@@ -273,6 +273,7 @@ export const WebsiteChatTab: React.FC<WebsiteChatTabProps> = ({
             <div className="h-[440px] rounded-xl overflow-hidden border border-neutral-800 bg-black relative shadow-2xl">
               <CustomerChatWidget
                 key={`sandbox-inpage-${sandboxResetKey}`}
+                widgetId={draftConfig.widget_id || (userId ? getOrCreateWidgetId(userId) : undefined)}
                 companyProfile={companyProfile}
                 isOpen={true}
                 themeColor={draftConfig.theme_color}
@@ -462,6 +463,7 @@ export const WebsiteChatTab: React.FC<WebsiteChatTabProps> = ({
                 <div className="h-[520px] rounded-xl overflow-hidden border border-neutral-800 bg-black relative shadow-2xl max-w-xl mx-auto">
                   <CustomerChatWidget
                     key={`sandbox-modal-${sandboxResetKey}`}
+                    widgetId={draftConfig.widget_id || (userId ? getOrCreateWidgetId(userId) : undefined)}
                     companyProfile={companyProfile}
                     isOpen={true}
                     onClose={() => setIsSandboxOpen(false)}

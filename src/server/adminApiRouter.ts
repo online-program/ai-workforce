@@ -325,28 +325,35 @@ adminRouter.get('/users', requireAdminRole('canViewUsers'), async (req: Authenti
     let dataAvailable = false;
 
     if (hasAdminCredentials()) {
-      const db = getAdminDb();
-      const usersSnap = await db.collection('users').get();
-      dataAvailable = true;
+      try {
+        const db = getAdminDb();
+        const usersSnap = await db.collection('users').get();
+        dataAvailable = true;
 
-      for (const userDoc of usersSnap.docs) {
-        const uid = userDoc.id;
-        const data = userDoc.data();
+        for (const userDoc of usersSnap.docs) {
+          const uid = userDoc.id;
+          const data = userDoc.data();
 
-        const [inqSnap, leadsSnap] = await Promise.all([
-          db.collection('users').doc(uid).collection('inquiries').get().catch(() => null),
-          db.collection('users').doc(uid).collection('leads').get().catch(() => null),
-        ]);
+          const [inqSnap, leadsSnap] = await Promise.all([
+            db.collection('users').doc(uid).collection('inquiries').get().catch(() => null),
+            db.collection('users').doc(uid).collection('leads').get().catch(() => null),
+          ]);
 
-        usersList.push({
-          uid,
-          email: data.email || data.user_email || '',
-          createdAt: data.created_at || null,
-          lastActiveAt: data.last_active_at || data.updated_at || null,
-          inquiriesCount: inqSnap ? inqSnap.size : 0,
-          leadsCount: leadsSnap ? leadsSnap.size : 0,
-          onboardingCompleted: data.onboarding_completed === true,
-        });
+          usersList.push({
+            uid,
+            email: data.email || data.user_email || '',
+            createdAt: data.created_at || null,
+            lastActiveAt: data.last_active_at || data.updated_at || null,
+            inquiriesCount: inqSnap ? inqSnap.size : 0,
+            leadsCount: leadsSnap ? leadsSnap.size : 0,
+            onboardingCompleted: data.onboarding_completed === true,
+          });
+        }
+      } catch (dbErr: any) {
+        const msg = String(dbErr?.message || '');
+        const isPermOrUnavail = dbErr?.code === 7 || dbErr?.code === 14 || msg.includes('PERMISSION_DENIED') || msg.includes('UNAVAILABLE');
+        if (!isPermOrUnavail) throw dbErr;
+        dataAvailable = false;
       }
     }
 
@@ -446,35 +453,42 @@ adminRouter.get('/conversations', requireAdminRole('canViewConversations'), asyn
     let dataAvailable = false;
 
     if (hasAdminCredentials()) {
-      const db = getAdminDb();
-      const usersSnap = await db.collection('users').get();
-      dataAvailable = true;
+      try {
+        const db = getAdminDb();
+        const usersSnap = await db.collection('users').get();
+        dataAvailable = true;
 
-      for (const uDoc of usersSnap.docs) {
-        const uid = uDoc.id;
-        const convSnap = await db.collection('users').doc(uid).collection('conversations').get().catch(() => null);
-        if (convSnap) {
-          convSnap.forEach((cDoc) => {
-            const data = cDoc.data();
-            conversationsList.push({
-              id: cDoc.id,
-              userId: uid,
-              widgetId: data.widget_id || null,
-              visitorId: data.visitor_id || 'visitor_anon',
-              customerName: data.customer_name || 'Website Visitor',
-              leadScore: data.lead_score || 'WARM',
-              messagesCount: Array.isArray(data.messages) ? data.messages.length : 0,
-              lastMessageText:
-                data.last_message ||
-                (Array.isArray(data.messages) && data.messages.length > 0
-                  ? data.messages[data.messages.length - 1].text
-                  : ''),
-              messages: Array.isArray(data.messages) ? data.messages : [],
-              updatedAt: data.updated_at || data.created_at || null,
-              status: data.status || 'Active',
+        for (const uDoc of usersSnap.docs) {
+          const uid = uDoc.id;
+          const convSnap = await db.collection('users').doc(uid).collection('conversations').get().catch(() => null);
+          if (convSnap) {
+            convSnap.forEach((cDoc) => {
+              const data = cDoc.data();
+              conversationsList.push({
+                id: cDoc.id,
+                userId: uid,
+                widgetId: data.widget_id || null,
+                visitorId: data.visitor_id || 'visitor_anon',
+                customerName: data.customer_name || 'Website Visitor',
+                leadScore: data.lead_score || 'WARM',
+                messagesCount: Array.isArray(data.messages) ? data.messages.length : 0,
+                lastMessageText:
+                  data.last_message ||
+                  (Array.isArray(data.messages) && data.messages.length > 0
+                    ? data.messages[data.messages.length - 1].text
+                    : ''),
+                messages: Array.isArray(data.messages) ? data.messages : [],
+                updatedAt: data.updated_at || data.created_at || null,
+                status: data.status || 'Active',
+              });
             });
-          });
+          }
         }
+      } catch (dbErr: any) {
+        const msg = String(dbErr?.message || '');
+        const isPermOrUnavail = dbErr?.code === 7 || dbErr?.code === 14 || msg.includes('PERMISSION_DENIED') || msg.includes('UNAVAILABLE');
+        if (!isPermOrUnavail) throw dbErr;
+        dataAvailable = false;
       }
     }
 
@@ -514,32 +528,39 @@ adminRouter.get('/inquiries', requireAdminRole('canViewInquiries'), async (req: 
     let dataAvailable = false;
 
     if (hasAdminCredentials()) {
-      const db = getAdminDb();
-      const usersSnap = await db.collection('users').get();
-      dataAvailable = true;
+      try {
+        const db = getAdminDb();
+        const usersSnap = await db.collection('users').get();
+        dataAvailable = true;
 
-      for (const uDoc of usersSnap.docs) {
-        const uid = uDoc.id;
-        const inqSnap = await db.collection('users').doc(uid).collection('inquiries').get().catch(() => null);
-        if (inqSnap) {
-          inqSnap.forEach((iDoc) => {
-            const data = iDoc.data();
-            inquiriesList.push({
-              id: iDoc.id,
-              userId: uid,
-              customerName: data.customer_name || data.companyName || 'Inbound Lead',
-              contactInfo: data.contact_info || data.contactName || data.email_recipient || 'Not provided',
-              leadScore: data.lead_score || 'WARM',
-              productOrService: data.product_or_service || 'General Inquiry',
-              quantity: data.quantity || '',
-              location: data.location || '',
-              status: data.status || 'Needs Approval',
-              emailDispatched: data.email_dispatched === true,
-              emailStatus: data.email_status || 'pending',
-              createdAt: data.created_at || null,
+        for (const uDoc of usersSnap.docs) {
+          const uid = uDoc.id;
+          const inqSnap = await db.collection('users').doc(uid).collection('inquiries').get().catch(() => null);
+          if (inqSnap) {
+            inqSnap.forEach((iDoc) => {
+              const data = iDoc.data();
+              inquiriesList.push({
+                id: iDoc.id,
+                userId: uid,
+                customerName: data.customer_name || data.companyName || 'Inbound Lead',
+                contactInfo: data.contact_info || data.contactName || data.email_recipient || 'Not provided',
+                leadScore: data.lead_score || 'WARM',
+                productOrService: data.product_or_service || 'General Inquiry',
+                quantity: data.quantity || '',
+                location: data.location || '',
+                status: data.status || 'Needs Approval',
+                emailDispatched: data.email_dispatched === true,
+                emailStatus: data.email_status || 'pending',
+                createdAt: data.created_at || null,
+              });
             });
-          });
+          }
         }
+      } catch (dbErr: any) {
+        const msg = String(dbErr?.message || '');
+        const isPermOrUnavail = dbErr?.code === 7 || dbErr?.code === 14 || msg.includes('PERMISSION_DENIED') || msg.includes('UNAVAILABLE');
+        if (!isPermOrUnavail) throw dbErr;
+        dataAvailable = false;
       }
     }
 

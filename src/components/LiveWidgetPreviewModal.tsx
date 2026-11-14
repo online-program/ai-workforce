@@ -3,11 +3,13 @@ import { motion, AnimatePresence } from 'motion/react';
 import { X, RotateCcw, Sparkles, ExternalLink, ShieldCheck, Globe, Laptop, Smartphone } from 'lucide-react';
 import { CompanyProfile, InquiryLead } from '../types.ts';
 import { CustomerChatWidget } from './CustomerChatWidget.tsx';
+import { getOrCreateWidgetId } from '../services/workspaceService.ts';
 
 interface LiveWidgetPreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
   companyProfile: CompanyProfile;
+  widgetId?: string;
   userId?: string;
   onLeadAutoCreated?: (lead: InquiryLead) => void;
   onNavigateToStudio?: () => void;
@@ -17,6 +19,7 @@ export const LiveWidgetPreviewModal: React.FC<LiveWidgetPreviewModalProps> = ({
   isOpen,
   onClose,
   companyProfile,
+  widgetId,
   userId,
   onLeadAutoCreated,
   onNavigateToStudio,
@@ -122,6 +125,7 @@ export const LiveWidgetPreviewModal: React.FC<LiveWidgetPreviewModalProps> = ({
             <div className="flex-1 relative overflow-hidden bg-neutral-50/50 dark:bg-neutral-950/50">
               <CustomerChatWidget
                 key={`preview-widget-${resetKey}`}
+                widgetId={widgetId || companyProfile.widget_id || (userId ? getOrCreateWidgetId(userId) : undefined)}
                 companyProfile={companyProfile}
                 isOpen={true}
                 onClose={onClose}

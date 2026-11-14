@@ -761,9 +761,10 @@ function evaluateDeterministicGuardrails(
 
     const wantsBullets = lower.includes('bullet') || lower.includes('3 bullet');
     if (wantsBullets) {
+      const bizLabel = biz ? `${biz.charAt(0).toUpperCase() + biz.slice(1)}` : 'Unspecified business type';
       const b1 = teamStr
-        ? `• Business & Team: ${biz.charAt(0).toUpperCase() + biz.slice(1)} with ${teamStr}.`
-        : `• Business: ${biz.charAt(0).toUpperCase() + biz.slice(1)}.`;
+        ? `• Business & Team: ${bizLabel} with ${teamStr}.`
+        : `• Business: ${bizLabel}.`;
       const b2 = vis && leads
         ? `• Inbound Traffic & Volume: ${vis} and ${leads}.`
         : leads

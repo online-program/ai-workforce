@@ -42,6 +42,10 @@ export const StandaloneEmbedChat: React.FC = () => {
     const params = new URLSearchParams(window.location.search);
     const widgetId = (params.get('widget_id') || params.get('id') || '').trim();
 
+    setLoading(true);
+    setWidgetUnavailable(null);
+    setCompanyProfile(defaultCompanyProfile);
+
     if (!widgetId) {
       setWidgetUnavailable('Missing widget_id parameter.');
       setLoading(false);

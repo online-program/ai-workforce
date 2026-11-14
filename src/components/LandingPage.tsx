@@ -1013,7 +1013,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </div>
               <h3 className="text-base font-bold text-white mb-2">Sub-1.2s Latency Runtime</h3>
               <p className="text-xs text-zinc-400 leading-relaxed">
-                Powered by Gemini 2.5 Flash server-side integration for instant, natural, fluid conversations on any device or network connection.
+                Powered by Google Gemini server-side integration for instant, natural, fluid conversations on any device or network connection.
               </p>
             </div>
           </div>
@@ -1159,7 +1159,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               companyProfile={AI_WORKFORCE_PROFILE}
               isOpen={true}
               onClose={() => setIsRealWidgetOpen(false)}
-              userId={userId}
+              userId={undefined}
               businessName={liveWidgetConfig?.business_name || AI_WORKFORCE_PROFILE.name}
               welcomeMessage={
                 liveWidgetConfig?.welcome_message ||

@@ -14,10 +14,14 @@ interface InquiryDetailModalProps {
     replyText: string,
     recipientEmailOverride?: string,
     googleAccessToken?: string
-  ) => Promise<{ success: boolean; error?: string; provider?: string } | void> | { success: boolean; error?: string; provider?: string } | void;
+  ) =>
+    | Promise<{ success: boolean; error?: string; provider?: string; email_dispatched?: boolean; email_status?: string } | void>
+    | { success: boolean; error?: string; provider?: string; email_dispatched?: boolean; email_status?: string }
+    | void;
   onRejectInquiry: (leadId: string, reason?: string) => void;
   onUpdateLeadStatus: (leadId: string, newStatus: LeadStatus) => void;
   onUpdateReplyDraft: (leadId: string, newDraft: string) => void;
+  onSaveManualNotes?: (leadId: string, notes: string) => Promise<void> | void;
   onDeleteInquiry?: (leadId: string) => void;
 }
 
@@ -29,6 +33,7 @@ export const InquiryDetailModal: React.FC<InquiryDetailModalProps> = ({
   onRejectInquiry,
   onUpdateLeadStatus,
   onUpdateReplyDraft,
+  onSaveManualNotes,
   onDeleteInquiry,
 }) => {
   const { user, accessToken } = useAuth();
@@ -114,11 +119,11 @@ export const InquiryDetailModal: React.FC<InquiryDetailModalProps> = ({
           });
         }
 
-        // Check if there are cached session messages in browser storage
-        if (typeof window !== 'undefined') {
+        // Check if there are cached session messages in browser storage for this explicit widget
+        const explicitWidgetId = typeof (lead as any).widget_id === 'string' ? (lead as any).widget_id.trim() : '';
+        if (typeof window !== 'undefined' && explicitWidgetId) {
           try {
-            const widgetId = (lead as any).widget_id || 'default';
-            const storedMsgs = sessionStorage.getItem(`aiw_msgs_${widgetId}`);
+            const storedMsgs = sessionStorage.getItem(`aiw_msgs_${explicitWidgetId}`);
             if (storedMsgs) {
               const parsed = JSON.parse(storedMsgs);
               if (Array.isArray(parsed) && parsed.length > 0) {
@@ -295,8 +300,11 @@ export const InquiryDetailModal: React.FC<InquiryDetailModalProps> = ({
         return;
       }
 
+      const emailWasDispatched = Boolean(res && typeof res === 'object' && (res as any).email_dispatched);
       setDispatchSuccessMessage(
-        'Response approved and published successfully into visitor conversation! Status moved to Waiting for Customer.'
+        emailWasDispatched
+          ? `Response approved, sent via ${(res as any).provider || 'email'}, and published into visitor conversation! Status moved to Waiting for Customer.`
+          : 'Response approved and published into visitor live chat (external email delivery not active). Status moved to Waiting for Customer.'
       );
 
       setTimeout(() => {
@@ -543,9 +551,13 @@ export const InquiryDetailModal: React.FC<InquiryDetailModalProps> = ({
     }
   };
 
-  const handleSaveManualNotes = () => {
+  const handleSaveManualNotes = async () => {
     if (!lead) return;
-    onUpdateLeadStatus(lead.id, lead.status || 'Needs Approval');
+    if (onSaveManualNotes) {
+      await onSaveManualNotes(lead.id, manualNotes);
+    } else {
+      onUpdateLeadStatus(lead.id, lead.status || 'Needs Approval');
+    }
     setNotesSavedNotice(true);
     setTimeout(() => setNotesSavedNotice(false), 2500);
   };

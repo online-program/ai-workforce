@@ -41,6 +41,7 @@ import {
   saveUserTask,
   completeUserTaskByLeadId,
   sendInquiryEmailReply,
+  getOrCreateWidgetId,
 } from './services/workspaceService.ts';
 import { Menu, X, Loader2 } from 'lucide-react';
 import { parseRouteFromLocation, getUrlForRoute } from './utils/navigation.ts';
@@ -181,21 +182,17 @@ export default function App() {
   // When user is authenticated, check metadata & subscribe to their Firestore workspace collections
   useEffect(() => {
     if (!user) {
-      // In unauthenticated guest preview state, check for active customer company profile
-      let guestProf = defaultCompanyProfile;
+      // Never hydrate global tenant state into guest mode; clear any legacy unscoped keys
       try {
-        const storedActive = localStorage.getItem('aw_active_company_profile');
-        if (storedActive) {
-          const parsed = JSON.parse(storedActive);
-          if (parsed && parsed.name && parsed.name !== 'AI Workforce' && parsed.name !== 'My Business') {
-            guestProf = parsed;
-          }
-        }
+        localStorage.removeItem('aw_active_company_profile');
       } catch (e) {}
       setLeads(defaultLeads);
       setActivities(defaultActivities);
       setTasks(defaultTasks);
-      setCompanyProfile(guestProf);
+      setCompanyProfile(defaultCompanyProfile);
+      setAdminRole(null);
+      setPendingInvitations([]);
+      setSelectedLeadDetail(null);
       setDataLoaded(true);
       setShowOnboarding(false);
       const route = parseRouteFromLocation();
@@ -356,9 +353,6 @@ export default function App() {
   // Handler: When user completes Smart Onboarding
   const handleOnboardingComplete = (compiledProfile: CompanyProfile) => {
     setCompanyProfile(compiledProfile);
-    try {
-      localStorage.setItem('aw_active_company_profile', JSON.stringify(compiledProfile));
-    } catch (e) {}
     setShowOnboarding(false);
     navigateTo('workspace', 'workspace_home');
   };
@@ -366,9 +360,6 @@ export default function App() {
   // Handler: When user updates Company Profile / Brain
   const handleUpdateCompanyProfile = async (newProfile: CompanyProfile) => {
     setCompanyProfile(newProfile);
-    try {
-      localStorage.setItem('aw_active_company_profile', JSON.stringify(newProfile));
-    } catch (e) {}
     setShowOnboarding(false);
     if (user) {
       try {
@@ -464,19 +455,22 @@ export default function App() {
         // Real dispatch failure: Inquiry remains in review!
         return {
           success: false,
-          error: dispatchResult.error || 'Email dispatch was rejected by the provider. Inquiry remains in review.',
+          error: dispatchResult.error || dispatchResult.email_error || 'Email dispatch was rejected by the provider. Inquiry remains in review.',
         };
       }
 
-      // Success: update inquiry status in database & local state
+      const emailWasDispatched = dispatchResult.email_dispatched === true;
+      const resolvedEmailStatus = dispatchResult.email_status || (emailWasDispatched ? 'accepted' : 'not_sent_conversation_only');
+
+      // Success: update inquiry status in database & local state truthfully
       if (user) {
         await updateInquiryStatus(user.uid, leadId, {
           status: 'Waiting for Customer',
           draft_reply: replyText,
           suggested_reply: replyText,
-          email_dispatched: true,
-          email_status: 'accepted',
-          email_dispatched_at: dispatchResult.sent_at || new Date().toISOString(),
+          email_dispatched: emailWasDispatched,
+          email_status: resolvedEmailStatus,
+          ...(emailWasDispatched ? { email_dispatched_at: dispatchResult.sent_at || new Date().toISOString() } : {}),
           email_recipient: effectiveRecipient,
         });
 
@@ -490,9 +484,9 @@ export default function App() {
                   status: 'Waiting for Customer' as LeadStatus,
                   draft_reply: replyText,
                   suggested_reply: replyText,
-                  email_dispatched: true,
-                  email_status: 'accepted',
-                  email_dispatched_at: dispatchResult.sent_at || new Date().toISOString(),
+                  email_dispatched: emailWasDispatched,
+                  email_status: resolvedEmailStatus,
+                  ...(emailWasDispatched ? { email_dispatched_at: dispatchResult.sent_at || new Date().toISOString() } : {}),
                   last_action_at: new Date().toISOString(),
                 }
               : l
@@ -509,8 +503,8 @@ export default function App() {
                 status: 'Waiting for Customer',
                 draft_reply: replyText,
                 suggested_reply: replyText,
-                email_dispatched: true,
-                email_status: 'accepted',
+                email_dispatched: emailWasDispatched,
+                email_status: resolvedEmailStatus,
               }
             : null
         );
@@ -518,8 +512,10 @@ export default function App() {
 
       return {
         success: true,
-        provider: dispatchResult.provider,
-      };
+        provider: dispatchResult.email_provider || dispatchResult.provider,
+        email_dispatched: emailWasDispatched,
+        email_status: resolvedEmailStatus,
+      } as any;
     } catch (err: any) {
       console.error('Error in handleApproveAndSend:', err);
       return {
@@ -645,6 +641,28 @@ export default function App() {
             }
           : null
       );
+    }
+  };
+
+  // Handler: Save manual internal follow-up notes
+  const handleSaveManualNotes = async (leadId: string, notes: string) => {
+    if (user) {
+      try {
+        await updateInquiryStatus(user.uid, leadId, {
+          additional_notes: notes,
+        } as any);
+      } catch (err) {
+        console.error('Error saving manual notes:', err);
+      }
+    } else {
+      setLeads((prev) =>
+        prev.map((l) =>
+          l.id === leadId ? { ...l, additional_notes: notes } as any : l
+        )
+      );
+    }
+    if (selectedLeadDetail && selectedLeadDetail.id === leadId) {
+      setSelectedLeadDetail((prev) => (prev ? ({ ...prev, additional_notes: notes } as any) : null));
     }
   };
 
@@ -1101,6 +1119,7 @@ export default function App() {
         onRejectInquiry={handleRejectInquiry}
         onUpdateLeadStatus={handleUpdateLeadStatus}
         onUpdateReplyDraft={handleUpdateReplyDraft}
+        onSaveManualNotes={handleSaveManualNotes}
         onDeleteInquiry={handleDeleteInquiry}
       />
 
@@ -1130,6 +1149,7 @@ export default function App() {
         onClose={() => setIsGlobalPreviewOpen(false)}
         companyProfile={companyProfile}
         userId={user?.uid}
+        widgetId={companyProfile.widget_id || (user?.uid ? getOrCreateWidgetId(user.uid) : undefined)}
         onNavigateToStudio={() => {
           setIsGlobalPreviewOpen(false);
           navigateTo('workspace', 'widget_studio');

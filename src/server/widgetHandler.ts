@@ -139,6 +139,66 @@ export function getStoredConversationOwner(tenantId: string, conversationId: str
   return undefined;
 }
 
+export function getStoredConversationFromMemory(
+  tenantId: string,
+  conversationId: string
+): StoredMemoryConversation | undefined {
+  return conversationMemoryStore.get(buildConversationMemoryKey(tenantId, conversationId, false));
+}
+
+export function ackStoredConversationMessagesInMemory(
+  tenantId: string,
+  conversationId: string,
+  visitorId: string,
+  type: 'delivered' | 'read',
+  messageIds: string[]
+): { found: boolean; ownershipOk: boolean; updatedCount: number } {
+  const conv = conversationMemoryStore.get(buildConversationMemoryKey(tenantId, conversationId, false));
+  if (!conv) {
+    return { found: false, ownershipOk: true, updatedCount: 0 };
+  }
+  if (conv.visitor_id && conv.visitor_id !== visitorId) {
+    return { found: true, ownershipOk: false, updatedCount: 0 };
+  }
+  const targetIds = new Set(messageIds.map((id) => String(id)));
+  const now = new Date().toISOString();
+  let updatedCount = 0;
+
+  conv.messages = (conv.messages || []).map((m) => {
+    if (!m.message_id || !targetIds.has(String(m.message_id))) return m;
+    const meta = { ...(m.metadata || {}) };
+    let changed = false;
+
+    if (type === 'delivered' && !meta.delivered) {
+      meta.delivered = true;
+      meta.delivered_at = meta.delivered_at || now;
+      changed = true;
+    }
+    if (type === 'read') {
+      if (!meta.delivered) {
+        meta.delivered = true;
+        meta.delivered_at = meta.delivered_at || now;
+        changed = true;
+      }
+      if (!meta.read) {
+        meta.read = true;
+        meta.read_at = meta.read_at || now;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      updatedCount++;
+      return { ...m, metadata: meta };
+    }
+    return m;
+  });
+  if (updatedCount > 0) {
+    conv.updated_at = now;
+  }
+  return { found: true, ownershipOk: true, updatedCount };
+}
+
 export function setConversationHumanOwnedInMemory(conversationId: string, humanOwned: boolean, tenantId?: string) {
   const nowIso = new Date().toISOString();
   if (tenantId) {

@@ -25,9 +25,20 @@ import {
   conversationMemoryStore,
   idempotencyMemoryStore,
   invalidateWidgetCache,
+  getStoredConversationFromMemory,
+  ackStoredConversationMessagesInMemory,
 } from '../src/server/widgetHandler.ts';
-import { stripPrivateFieldsFromWidget, buildPublicSummary } from '../src/server/platformConfig.ts';
-import { issueVisitorSessionToken, verifyVisitorSessionToken } from '../src/server/visitorSessionService.ts';
+import {
+  stripPrivateFieldsFromWidget,
+  buildPublicSummary,
+  isReservedOfficialWidgetId,
+} from '../src/server/platformConfig.ts';
+import {
+  issueVisitorSessionToken,
+  verifyVisitorSessionToken,
+  isVisitorSessionSecretConfigured,
+} from '../src/server/visitorSessionService.ts';
+import { dispatchEmailViaProvider } from '../src/server/emailService.ts';
 import { getOrCreateAlphaMemory, resetAlphaMemory } from '../src/server/alphaMemory.ts';
 import { retrieveRelevantBrainSlice, invalidateBrainCache } from '../src/server/alphaBrainRetriever.ts';
 import { createYouTubeOAuthState, consumeYouTubeOAuthState } from '../src/server/marketingService.ts';
@@ -466,5 +477,167 @@ describe('Phase 8A — Security & Tenant Isolation Tests', () => {
     assert.match(rules, /match \/public_widgets\/\{widgetId\}[\s\S]*!isReservedOfficialWidget\(widgetId\)[\s\S]*hasNoSensitiveWidgetFields\(request\.resource\.data\)/);
     assert.match(rules, /match \/contact_submissions\/\{submissionId\}[\s\S]*allow write: if false;/);
     assert.match(rules, /match \/handoffs\/\{handoffId\}[\s\S]*allow write: if false;/);
+  });
+
+  it('rejects all reserved official widget IDs including legacy wgt_8va1xl_re01u0 and blocks official widget lead contamination in client components', () => {
+    for (const reserved of [
+      'official-ai-workforce',
+      'ai_workforce_official',
+      'ai_workforce',
+      'ai-workforce',
+      'wgt_8va1xl_re01u0',
+    ]) {
+      assert.equal(isReservedOfficialWidgetId(reserved), true, `Expected ${reserved} to be reserved`);
+    }
+    assert.equal(isReservedOfficialWidgetId('wgt_cust_12345'), false);
+
+    const landingSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/LandingPage.tsx'), 'utf8');
+    assert.match(landingSrc, /widgetId="official-ai-workforce"/);
+    assert.match(landingSrc, /userId=\{undefined\}/);
+
+    const appSrc = fs.readFileSync(path.join(process.cwd(), 'src/App.tsx'), 'utf8');
+    assert.doesNotMatch(appSrc, /localStorage\.getItem\(['"]aw_active_company_profile['"]\)/);
+    assert.doesNotMatch(appSrc, /localStorage\.setItem\(['"]aw_active_company_profile['"]/);
+
+    const widgetSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/CustomerChatWidget.tsx'), 'utf8');
+    assert.match(widgetSrc, /!isReservedOfficialWidgetIdClient\(widgetId\)/);
+    assert.match(widgetSrc, /res\.status === 401 \|\| res\.status === 403/);
+    assert.match(widgetSrc, /UNAUTHORIZED_OWNERSHIP/);
+
+    const embedSrc = fs.readFileSync(path.join(process.cwd(), 'public/chat-widget.js'), 'utf8');
+    assert.match(embedSrc, /\/api\/widget\/session/);
+    assert.match(embedSrc, /x-visitor-token/);
+  });
+
+  it('handles visitorSessionService secret configuration cleanly in test and production modes', () => {
+    const prevNodeEnv = process.env.NODE_ENV;
+    const prevSecret = process.env.VISITOR_SESSION_SECRET;
+    try {
+      delete process.env.VISITOR_SESSION_SECRET;
+      assert.equal(isVisitorSessionSecretConfigured(), false);
+
+      // Even when NODE_ENV=production without VISITOR_SESSION_SECRET, per-boot fallback issues & verifies tokens cleanly
+      process.env.NODE_ENV = 'production';
+      const tok = issueVisitorSessionToken({
+        tenant_id: 'tenant_prod_1',
+        widget_id: 'wgt_prod_1',
+        visitor_id: 'vis_prod_1',
+        conversation_id: 'conv_prod_1',
+      });
+      const verified = verifyVisitorSessionToken(tok, {
+        tenant_id: 'tenant_prod_1',
+        widget_id: 'wgt_prod_1',
+        visitor_id: 'vis_prod_1',
+        conversation_id: 'conv_prod_1',
+      });
+      assert.equal(verified.valid, true);
+
+      // Explicitly short VISITOR_SESSION_SECRET (<32 chars) in production is rejected
+      process.env.VISITOR_SESSION_SECRET = 'too-short-secret';
+      assert.throws(() =>
+        issueVisitorSessionToken({
+          tenant_id: 'tenant_prod_1',
+          visitor_id: 'vis_prod_1',
+          conversation_id: 'conv_prod_1',
+        })
+      );
+
+      // Valid >=32-char secret passes configuration check
+      process.env.VISITOR_SESSION_SECRET = '0123456789abcdef0123456789abcdef_prod';
+      assert.equal(isVisitorSessionSecretConfigured(), true);
+    } finally {
+      process.env.NODE_ENV = prevNodeEnv;
+      if (prevSecret === undefined) delete process.env.VISITOR_SESSION_SECRET;
+      else process.env.VISITOR_SESSION_SECRET = prevSecret;
+    }
+  });
+
+  it('isolates in-memory conversation retrieval and ack tracking by tenant + visitor', () => {
+    conversationMemoryStore.set('tenantA::conv_mem_1', {
+      id: 'conv_mem_1',
+      conversation_id: 'conv_mem_1',
+      widget_id: 'wgt_a',
+      visitor_id: 'vis_owner_a',
+      tenant_id: 'tenantA',
+      customer_name: 'Alice',
+      messages: [
+        { message_id: 'm1', sender: 'customer', text: 'Hi', timestamp: new Date().toISOString() },
+        { message_id: 'm2', sender: 'assistant', text: 'Hello Alice', timestamp: new Date().toISOString(), metadata: {} },
+      ],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    assert.equal(getStoredConversationFromMemory('tenantB', 'conv_mem_1'), undefined);
+    const convA = getStoredConversationFromMemory('tenantA', 'conv_mem_1');
+    assert.ok(convA);
+    assert.equal(convA.messages.length, 2);
+
+    const wrongVisitorAck = ackStoredConversationMessagesInMemory('tenantA', 'conv_mem_1', 'vis_intruder', 'delivered', ['m2']);
+    assert.equal(wrongVisitorAck.ownershipOk, false);
+    assert.equal(wrongVisitorAck.updatedCount, 0);
+
+    const validAck = ackStoredConversationMessagesInMemory('tenantA', 'conv_mem_1', 'vis_owner_a', 'read', ['m2']);
+    assert.equal(validAck.found, true);
+    assert.equal(validAck.ownershipOk, true);
+    assert.equal(validAck.updatedCount, 1);
+    assert.equal(convA.messages[1].metadata?.delivered, true);
+    assert.equal(convA.messages[1].metadata?.read, true);
+  });
+
+  it('dispatches real Gmail API RFC 2822 email when googleAccessToken is supplied and surfaces 401 errors honestly', async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+      let capturedUrl = '';
+      let capturedAuth = '';
+      let capturedRaw = '';
+
+      globalThis.fetch = (async (input: any, init?: any) => {
+        capturedUrl = String(input);
+        capturedAuth = init?.headers?.Authorization || '';
+        const parsed = JSON.parse(init?.body || '{}');
+        capturedRaw = parsed.raw || '';
+        return new Response(JSON.stringify({ id: 'gmail-msg-999' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as any;
+
+      const okRes = await dispatchEmailViaProvider({
+        to: 'customer@gmail.com',
+        subject: 'Follow up on your quote',
+        bodyText: 'Here is your quote breakdown.',
+        fromName: 'Acme Corp',
+        fromEmail: 'sales@acme.test',
+        googleAccessToken: 'ya29.test-gmail-token',
+      });
+
+      assert.equal(okRes.success, true);
+      assert.equal(okRes.provider, 'gmail');
+      assert.equal(okRes.provider_message_id, 'gmail-msg-999');
+      assert.equal(capturedUrl, 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send');
+      assert.equal(capturedAuth, 'Bearer ya29.test-gmail-token');
+      assert.ok(capturedRaw.length > 10);
+
+      // Simulate expired Gmail OAuth token -> HTTP 401
+      globalThis.fetch = (async () =>
+        new Response(JSON.stringify({ error: { message: 'Invalid Credentials' } }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        })) as any;
+
+      const errRes = await dispatchEmailViaProvider({
+        to: 'customer@gmail.com',
+        subject: 'Retry quote',
+        bodyText: 'Checking retry.',
+        googleAccessToken: 'ya29.expired-token',
+      });
+
+      assert.equal(errRes.success, false);
+      assert.equal(errRes.errorType, 'provider_rejected');
+      assert.match(errRes.failure_reason || '', /Gmail/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

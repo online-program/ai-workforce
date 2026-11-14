@@ -565,4 +565,38 @@ describe('Phase 8B/C/D/E — Core Business Flows, Multi-Tenant Neutrality & Pers
     assert.equal((await resolvePublicWidget('wgt_saas_b'))?.business_name, 'CloudScale Analytics');
     assert.equal((await resolvePublicWidget('wgt_edu_c'))?.business_name, 'Vertex Coding Bootcamp');
   });
+
+  it('handles 3-bullet situation summary safely without crashing when business_type is undefined', () => {
+    const convId = `conv-summary-${Date.now()}`;
+    const mem = getOrCreateAlphaMemory(convId, undefined, 'tenant-summary');
+    mem.visitor.business_type = undefined;
+    mem.historical_memory.business = undefined;
+    mem.historical_memory.team = '12 people';
+    mem.requirements.lead_volume = '40 leads/month';
+    mem.primary_problem = 'slow follow-up response time';
+
+    const decision = evaluateAlphaDecision(
+      'Please summarize my situation in 3 bullets',
+      mem,
+      {
+        companyName: 'AI Workforce',
+        industry: 'B2B AI',
+        deploymentType: 'PLATFORM',
+        summary: 'AI Sales Manager platform.',
+        offerings: ['Alpha AI Sales Manager'],
+        pricingSummary: '$149/mo',
+        policiesSummary: '',
+        salesProcessSummary: '',
+        relevantFaqs: [],
+        forbiddenTopics: [],
+      } as any,
+      []
+    );
+
+    assert.equal(decision.topic, 'situation_comprehension_3_bullets');
+    assert.ok(decision.groundedCapabilityResponse?.includes('Unspecified business type'));
+    assert.ok(decision.groundedCapabilityResponse?.includes('12 people'));
+    assert.ok(decision.groundedCapabilityResponse?.includes('40 leads/month'));
+    resetAlphaMemory(convId, 'tenant-summary');
+  });
 });

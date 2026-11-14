@@ -77,10 +77,10 @@ function getGenAIClient(apiKey: string): GoogleGenAI {
 
 function getCandidateModels(): string[] {
   const now = Date.now();
-  // Bound to PRIMARY (gemini-3.1-flash-lite) and BACKUP (gemini-3.5-flash-lite) to eliminate ~32s cascade
+  // Bound to PRIMARY (gemini-3.1-flash-lite) and BACKUP (gemini-4-hydrogen) to eliminate slow cascades
   const allModels = [
     'gemini-3.1-flash-lite',
-    'gemini-3.5-flash-lite',
+    'gemini-4-hydrogen',
   ];
   return allModels.sort((a, b) => {
     const aBackoff = (modelBackoffUntil[a] || 0) > now ? 1 : 0;

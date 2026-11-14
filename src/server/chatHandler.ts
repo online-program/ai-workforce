@@ -631,11 +631,11 @@ export async function processWebsiteChatMessage(
   // Record Telemetry into Model Registry Dashboard Store
   const estInTokens = Math.round(trimmedMsg.length / 4) + 120;
   const estOutTokens = Math.round((genResult.reply || '').length / 4);
-  const estCost = estimateTokenCost('gemini', genResult.modelUsed || 'gemini-3.5-flash-lite', estInTokens, estOutTokens);
+  const estCost = estimateTokenCost('gemini', genResult.modelUsed || 'gemini-3.1-flash-lite', estInTokens, estOutTokens);
 
   recordModelTelemetry({
     providerId: 'gemini',
-    modelName: genResult.modelUsed || 'gemini-3.5-flash-lite',
+    modelName: genResult.modelUsed || 'gemini-3.1-flash-lite',
     taskCategory: orchestration.step3_taskCategory,
     inputTokens: estInTokens,
     outputTokens: estOutTokens,

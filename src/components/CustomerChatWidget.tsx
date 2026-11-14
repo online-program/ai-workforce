@@ -31,7 +31,7 @@ import {
 } from '../types.ts';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../firebase.ts';
-import { saveInquiry, logUserActivity, saveUserTask, saveConversation } from '../services/workspaceService.ts';
+import { saveInquiry, logUserActivity, saveUserTask, saveConversation, isReservedOfficialWidgetIdClient } from '../services/workspaceService.ts';
 import { isPortfolioDeployment, getPortfolioRoleTitle } from '../utils/portfolioUtils.ts';
 import { hasCategoryConsent } from '../services/consentService.ts';
 import { getAccessibleTextColor, getWidgetBoxShadowStyle } from '../utils/widgetDesignUtils.ts';
@@ -723,7 +723,16 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
           { headers: { Authorization: `Bearer ${token}` } }
         );
 
-        if (res.status === 401) {
+        if (res.status === 401 || res.status === 403) {
+          const errBody = await res.json().catch(() => ({} as any));
+          if (errBody?.code === 'UNAUTHORIZED_OWNERSHIP') {
+            if (isMounted) {
+              const rotatedConvId = `conv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+              setConversationId(rotatedConvId);
+              setVisitorToken(null);
+            }
+            return;
+          }
           token = await ensureVisitorToken(true);
           if (!token) return;
           res = await fetch(
@@ -1040,61 +1049,111 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
 
     try {
       const hasAnalyticsConsent = hasCategoryConsent('analytics');
-      const reqHeaders: Record<string, string> = {
-        'Content-Type': 'application/json',
-        'x-consent-analytics': hasAnalyticsConsent ? '1' : '0',
-      };
-      if (visitorToken) {
-        reqHeaders['x-visitor-token'] = visitorToken;
-      }
-      if (isSimulatedPreview && auth?.currentUser) {
+      const canUseSimulation = Boolean(isSimulatedPreview && auth?.currentUser);
+      const effectiveWidgetIdForChat = widgetId || (isSimulatedPreview ? userId || '' : '');
+
+      let ownerIdToken: string | null = null;
+      if (canUseSimulation && auth?.currentUser) {
         try {
-          const ownerIdToken = await auth.currentUser.getIdToken();
-          if (ownerIdToken) {
-            reqHeaders['Authorization'] = `Bearer ${ownerIdToken}`;
-          }
+          ownerIdToken = await auth.currentUser.getIdToken();
         } catch {}
       }
-      const effectiveWidgetIdForChat = widgetId || (isSimulatedPreview ? userId || '' : '');
-      const response = await fetch('/api/widget/chat', {
-        method: 'POST',
-        headers: reqHeaders,
-        signal: controller.signal,
-        body: JSON.stringify({
-          widget_id: effectiveWidgetIdForChat,
-          conversation_id: conversationId,
-          visitor_id: visitorId,
-          visitor_session_token: visitorToken || undefined,
-          think_mode: 'auto',
-          thinkMode: 'auto',
-          lead_id: currentLeadId || undefined,
-          message: userMsg,
-          client_message_id: userMsgId,
-          user_id: userId,
-          customer_name: leadProfile?.customer_name || 'Website Visitor',
-          existing_profile: leadProfile || undefined,
-          message_history: historySnapshot.map((m) => ({
-            sender: m.sender,
-            text: m.text,
-            timestamp: m.timestamp,
-          })),
-          company_profile: isSimulatedPreview ? activeCompanyProfile : undefined,
-          environment: isSimulatedPreview ? 'simulation' : 'production',
-          is_simulated: isSimulatedPreview,
-          stream: true,
-          analytics_consent: hasAnalyticsConsent,
-        }),
-      });
+
+      const mintSessionToken = async (targetConvId: string): Promise<string | null> => {
+        if (!effectiveWidgetIdForChat) return null;
+        try {
+          const sRes = await fetch('/api/widget/session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              widget_id: effectiveWidgetIdForChat,
+              conversation_id: targetConvId,
+              visitor_id: visitorId,
+            }),
+            signal: controller.signal,
+          });
+          if (!sRes.ok) return null;
+          const sData = await sRes.json().catch(() => ({} as any));
+          if (sData?.success && sData?.token) {
+            setVisitorToken(sData.token);
+            return sData.token;
+          }
+        } catch {}
+        return null;
+      };
+
+      let activeVisitorToken = visitorToken;
+      let activeConvId = conversationId;
+      if (!canUseSimulation && effectiveWidgetIdForChat && !activeVisitorToken) {
+        activeVisitorToken = await mintSessionToken(activeConvId);
+      }
+
+      const sendChatRequest = async (tokenToUse: string | null, convIdToUse: string) => {
+        const reqHeaders: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'x-consent-analytics': hasAnalyticsConsent ? '1' : '0',
+        };
+        if (tokenToUse) {
+          reqHeaders['x-visitor-token'] = tokenToUse;
+        }
+        if (canUseSimulation && ownerIdToken) {
+          reqHeaders['Authorization'] = `Bearer ${ownerIdToken}`;
+        }
+        return fetch('/api/widget/chat', {
+          method: 'POST',
+          headers: reqHeaders,
+          signal: controller.signal,
+          body: JSON.stringify({
+            widget_id: effectiveWidgetIdForChat,
+            conversation_id: convIdToUse,
+            visitor_id: visitorId,
+            visitor_session_token: tokenToUse || undefined,
+            think_mode: 'auto',
+            thinkMode: 'auto',
+            lead_id: currentLeadId || undefined,
+            message: userMsg,
+            client_message_id: userMsgId,
+            user_id: canUseSimulation ? userId : undefined,
+            customer_name: leadProfile?.customer_name || 'Website Visitor',
+            existing_profile: leadProfile || undefined,
+            message_history: historySnapshot.map((m) => ({
+              sender: m.sender,
+              text: m.text,
+              timestamp: m.timestamp,
+            })),
+            company_profile: canUseSimulation ? activeCompanyProfile : undefined,
+            environment: canUseSimulation ? 'simulation' : 'production',
+            is_simulated: canUseSimulation,
+            stream: true,
+            analytics_consent: hasAnalyticsConsent,
+          }),
+        });
+      };
+
+      let response = await sendChatRequest(activeVisitorToken, activeConvId);
+
+      if ((response.status === 401 || response.status === 403) && !canUseSimulation && effectiveWidgetIdForChat) {
+        const errBody = await response.json().catch(() => ({} as any));
+        const errCode = typeof errBody?.code === 'string' ? errBody.code : '';
+        if (errCode === 'UNAUTHORIZED_OWNERSHIP') {
+          activeConvId = `conv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          setConversationId(activeConvId);
+          setVisitorToken(null);
+          activeVisitorToken = await mintSessionToken(activeConvId);
+          if (activeVisitorToken) {
+            response = await sendChatRequest(activeVisitorToken, activeConvId);
+          }
+        } else if (response.status === 401 || errCode.startsWith('TOKEN_')) {
+          activeVisitorToken = await mintSessionToken(activeConvId);
+          if (activeVisitorToken) {
+            response = await sendChatRequest(activeVisitorToken, activeConvId);
+          }
+        }
+      }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || `Server error (${response.status})`);
-      }
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      if (!reader) {
-        throw new Error('Readable stream not supported');
       }
 
       const assistantMsgId = `msg-${Date.now() + 1}`;
@@ -1103,68 +1162,81 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
 
       if (activeRequestIdRef.current !== currentRequestId) return;
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: assistantMsgId,
-          sender: 'assistant',
-          text: '',
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-      setStreamingMsgId(assistantMsgId);
-      setDisplayedStreamingText('');
-      setIsTyping(false);
-
-      let buffer = '';
-      while (true) {
-        if (activeRequestIdRef.current !== currentRequestId || controller.signal.aborted) {
-          break;
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json') || !response.body?.getReader) {
+        const jsonPayload = await response.json().catch(() => null);
+        if (jsonPayload) {
+          lastResult = jsonPayload;
+          accumulatedText = typeof jsonPayload.reply === 'string' ? jsonPayload.reply : '';
         }
+        setIsTyping(false);
+      } else {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
 
-        const { value, done } = await reader.read();
-        if (done) break;
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: assistantMsgId,
+            sender: 'assistant',
+            text: '',
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+        setStreamingMsgId(assistantMsgId);
+        setDisplayedStreamingText('');
+        setIsTyping(false);
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() || '';
+        let buffer = '';
+        while (true) {
+          if (activeRequestIdRef.current !== currentRequestId || controller.signal.aborted) {
+            break;
+          }
 
-        for (const line of lines) {
-          if (activeRequestIdRef.current !== currentRequestId || controller.signal.aborted) break;
-          const cleanLine = line.trim();
-          if (cleanLine.startsWith('data: ')) {
-            try {
-              const eventData = JSON.parse(cleanLine.slice(6));
-              if (eventData.type === 'chunk' && eventData.text) {
-                accumulatedText += eventData.text;
-                setDisplayedStreamingText(accumulatedText);
-              } else if (eventData.type === 'metadata' && eventData.data) {
-                lastResult = eventData.data;
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (activeRequestIdRef.current !== currentRequestId || controller.signal.aborted) break;
+            const cleanLine = line.trim();
+            if (cleanLine.startsWith('data: ')) {
+              try {
+                const eventData = JSON.parse(cleanLine.slice(6));
+                if (eventData.type === 'chunk' && eventData.text) {
+                  accumulatedText += eventData.text;
+                  setDisplayedStreamingText(accumulatedText);
+                } else if (eventData.type === 'metadata' && eventData.data) {
+                  lastResult = eventData.data;
+                }
+              } catch (err) {
+                console.warn('Could not parse streamed line:', err);
               }
-            } catch (err) {
-              console.warn('Could not parse streamed line:', err);
             }
           }
         }
-      }
 
-      if (activeRequestIdRef.current !== currentRequestId || controller.signal.aborted) {
-        return;
-      }
+        if (activeRequestIdRef.current !== currentRequestId || controller.signal.aborted) {
+          return;
+        }
 
-      if (buffer.trim().startsWith('data: ')) {
-        try {
-          const eventData = JSON.parse(buffer.trim().slice(6));
-          if (eventData.type === 'chunk' && eventData.text) {
-            accumulatedText += eventData.text;
-          } else if (eventData.type === 'metadata' && eventData.data) {
-            lastResult = eventData.data;
-          }
-        } catch {}
-      }
+        if (buffer.trim().startsWith('data: ')) {
+          try {
+            const eventData = JSON.parse(buffer.trim().slice(6));
+            if (eventData.type === 'chunk' && eventData.text) {
+              accumulatedText += eventData.text;
+            } else if (eventData.type === 'metadata' && eventData.data) {
+              lastResult = eventData.data;
+            }
+          } catch {}
+        }
 
-      setStreamingMsgId(null);
-      setDisplayedStreamingText('');
+        setStreamingMsgId(null);
+        setDisplayedStreamingText('');
+      }
 
       // 3. Robust client-side reply extraction without destructive preposition filtering
       const cleanAssistantText = (accumulatedText.trim() || lastResult?.reply || '').trim();
@@ -1226,8 +1298,13 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
         setVisitorToken(lastResult.visitor_session_token);
       }
 
-      // Lead & Work Queue Sync in Firestore (Non-blocking background sync)
-      if (userId && (lastResult?.is_sales_lead || lastResult?.inquiry_registered) && (lastResult?.lead_data || lastResult?.structured_profile)) {
+      // Lead & Work Queue Sync in Firestore (Non-blocking background sync, never for official landing widget)
+      if (
+        userId &&
+        !isReservedOfficialWidgetIdClient(widgetId) &&
+        (lastResult?.is_sales_lead || lastResult?.inquiry_registered) &&
+        (lastResult?.lead_data || lastResult?.structured_profile)
+      ) {
         const leadData = lastResult.lead_data;
         const sp = lastResult.structured_profile;
         const leadId = currentLeadId || `lead-web-${Date.now()}`;

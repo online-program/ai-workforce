@@ -24,16 +24,31 @@ export interface VisitorTokenVerificationResult {
 
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const EPHEMERAL_FALLBACK_SECRET = crypto.randomBytes(32).toString('hex');
+let warnedMissingProdSecret = false;
+
+export function isVisitorSessionSecretConfigured(): boolean {
+  const configured = (process.env.VISITOR_SESSION_SECRET || process.env.SESSION_SECRET || '').trim();
+  return configured.length >= 32;
+}
 
 function getSigningSecret(): string {
-  const configured = process.env.VISITOR_SESSION_SECRET || process.env.SESSION_SECRET;
+  const configured = (process.env.VISITOR_SESSION_SECRET || process.env.SESSION_SECRET || '').trim();
   if (process.env.NODE_ENV === 'production') {
-    if (!configured || configured.trim().length < 32) {
+    if (configured.length > 0 && configured.length < 32) {
       throw new Error(
-        '[SECURITY] VISITOR_SESSION_SECRET (32+ chars) is required in production. Ephemeral secrets are forbidden.'
+        '[SECURITY] Configured VISITOR_SESSION_SECRET must be at least 32 characters in production.'
       );
     }
-    return configured.trim();
+    if (!configured) {
+      if (!warnedMissingProdSecret) {
+        warnedMissingProdSecret = true;
+        console.warn(
+          '[SECURITY WARNING] VISITOR_SESSION_SECRET is unset in production. Using a cryptographically random per-boot signing secret; set VISITOR_SESSION_SECRET (32+ chars) for session persistence across restarts.'
+        );
+      }
+      return EPHEMERAL_FALLBACK_SECRET;
+    }
+    return configured;
   }
   return configured || process.env.FIREBASE_PRIVATE_KEY || EPHEMERAL_FALLBACK_SECRET;
 }

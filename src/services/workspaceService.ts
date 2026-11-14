@@ -97,23 +97,47 @@ export function setLocalCache<T>(key: string, value: T): void {
   }
 }
 
+const RESERVED_OFFICIAL_WIDGET_IDS = new Set<string>([
+  'ai_workforce_official',
+  'official-ai-workforce',
+  'ai_workforce',
+  'ai-workforce',
+  'wgt_8va1xl_re01u0',
+]);
+
+export function isReservedOfficialWidgetIdClient(widgetId?: string | null): boolean {
+  if (!widgetId || typeof widgetId !== 'string') return false;
+  return RESERVED_OFFICIAL_WIDGET_IDS.has(widgetId.trim().toLowerCase());
+}
+
 // Helper: Generate collision-free unique widget ID for each business
 export function generateUniqueWidgetId(userId?: string): string {
-  const rand = Math.random().toString(36).substring(2, 8) + Math.random().toString(36).substring(2, 6);
-  if (!userId) return `wgt_${rand}`;
-  const cleanUid = userId.replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(0, 6);
-  return `wgt_${cleanUid}_${rand.slice(0, 6)}`;
+  for (let i = 0; i < 5; i++) {
+    const rand = Math.random().toString(36).substring(2, 8) + Math.random().toString(36).substring(2, 6);
+    const candidate = !userId
+      ? `wgt_${rand}`
+      : `wgt_${userId.replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(0, 6)}_${rand.slice(0, 6)}`;
+    if (!isReservedOfficialWidgetIdClient(candidate)) {
+      return candidate;
+    }
+  }
+  return `wgt_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
 }
 
 export function getOrCreateWidgetId(userId: string): string {
   const cacheKey = `aw_widget_cfg_${userId}`;
   const cached = getLocalCache<any>(cacheKey, null);
-  if (cached && cached.widget_id && cached.widget_id.startsWith('wgt_')) {
+  if (
+    cached &&
+    cached.widget_id &&
+    cached.widget_id.startsWith('wgt_') &&
+    !isReservedOfficialWidgetIdClient(cached.widget_id)
+  ) {
     return cached.widget_id;
   }
   const idKey = `aw_widget_id_${userId}`;
   const existingId = getLocalCache<string | null>(idKey, null);
-  if (existingId && existingId.startsWith('wgt_')) {
+  if (existingId && existingId.startsWith('wgt_') && !isReservedOfficialWidgetIdClient(existingId)) {
     return existingId;
   }
   const newId = generateUniqueWidgetId(userId);
@@ -179,7 +203,9 @@ export async function syncWidgetConfigToServer(
   widgetId?: string,
   extraConfig?: any
 ): Promise<void> {
-  const effectiveWidgetId = widgetId || getOrCreateWidgetId(userId);
+  const candidateId = widgetId && !isReservedOfficialWidgetIdClient(widgetId) ? widgetId : getOrCreateWidgetId(userId);
+  const effectiveWidgetId = candidateId;
+  if (isReservedOfficialWidgetIdClient(effectiveWidgetId)) return;
   try {
     const authHeaders = await getWorkspaceAuthHeaders();
     await fetch('/api/widget/config', {
@@ -757,27 +783,29 @@ export async function saveCompanyProfile(userId: string, profile: CompanyProfile
       );
     }
 
-    // Also sync public projection (NEVER write private company_profile to public_widgets)
+    // Also sync public projection (NEVER write private company_profile to public_widgets or reserved official widget IDs)
     const widgetId = getOrCreateWidgetId(userId);
-    const publicSummary = {
-      name: profile.brandName || profile.name || 'My Business',
-      industry: profile.industry || 'Commercial Solutions',
-      businessType: profile.businessType || 'goods',
-      deploymentType: profile.deploymentType || 'BUSINESS',
-    };
-    tasks.push(
-      setDoc(
-        doc(db, 'public_widgets', widgetId),
-        {
-          widget_id: widgetId,
-          user_id: userId,
-          business_name: profile.name,
-          public_summary: publicSummary,
-          updated_at: new Date().toISOString(),
-        },
-        { merge: true }
-      )
-    );
+    if (!isReservedOfficialWidgetIdClient(widgetId)) {
+      const publicSummary = {
+        name: profile.brandName || profile.name || 'My Business',
+        industry: profile.industry || 'Commercial Solutions',
+        businessType: profile.businessType || 'goods',
+        deploymentType: profile.deploymentType || 'BUSINESS',
+      };
+      tasks.push(
+        setDoc(
+          doc(db, 'public_widgets', widgetId),
+          {
+            widget_id: widgetId,
+            user_id: userId,
+            business_name: profile.name,
+            public_summary: publicSummary,
+            updated_at: new Date().toISOString(),
+          },
+          { merge: true }
+        )
+      );
+    }
 
     await Promise.allSettled(tasks);
 
@@ -1225,7 +1253,11 @@ export async function getWidgetConfig(userId: string): Promise<any> {
 }
 
 export async function saveWidgetConfig(userId: string, config: any): Promise<any> {
-  const widgetId = config.widget_id || getOrCreateWidgetId(userId);
+  const rawWidgetId = config.widget_id;
+  if (rawWidgetId && isReservedOfficialWidgetIdClient(rawWidgetId)) {
+    throw new Error('Forbidden: Cannot overwrite reserved official platform widget configuration.');
+  }
+  const widgetId = rawWidgetId || getOrCreateWidgetId(userId);
   const cacheKey = `aw_widget_cfg_${userId}`;
   const companyProf = getLocalCache<CompanyProfile | null>(`aw_company_prof_${userId}`, null);
 
@@ -1368,8 +1400,13 @@ export interface SendInquiryReplyParams {
 
 export interface SendInquiryReplyResponse {
   success: boolean;
-  status: 'accepted' | 'failed';
+  status: 'accepted' | 'published' | 'failed';
+  published?: boolean;
+  email_dispatched?: boolean;
+  email_status?: string;
+  email_error?: string;
   provider?: string;
+  email_provider?: string;
   provider_message_id?: string;
   sent_at?: string;
   recipient?: string;

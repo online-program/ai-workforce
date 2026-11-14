@@ -69,6 +69,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
         cachedAccessToken = null;
         setAccessToken(null);
+        try {
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('aw_active_company_profile');
+          }
+        } catch {}
       }
       setLoading(false);
     });
@@ -150,6 +155,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAuthError(null);
     cachedAccessToken = null;
     setAccessToken(null);
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('aw_active_company_profile');
+      }
+    } catch {}
     await signOut(auth);
   };
 

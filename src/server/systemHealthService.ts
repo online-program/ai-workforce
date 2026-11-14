@@ -1,6 +1,7 @@
 import { getAdminDb, hasAdminCredentials, probeAdminFirestore } from './firebaseAdmin.ts';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { getPublicWidgetCount } from './widgetHandler.ts';
+import { isVisitorSessionSecretConfigured } from './visitorSessionService.ts';
 
 export type HealthStatus = 'HEALTHY' | 'DEGRADED' | 'CRITICAL' | 'UNKNOWN';
 
@@ -232,15 +233,19 @@ export async function runSystemDiagnostics(): Promise<SystemHealthReport> {
     widgetMessage = `Unable to query registered widgets count: ${err?.message || 'database unavailable'}`;
   }
 
+  const secretConfigured = isVisitorSessionSecretConfigured();
   subsystems.push({
     name: 'Embed Widget Delivery Runtime',
     key: 'widget_runtime',
     status: widgetStatus,
     latencyMs: Date.now() - widgetStart,
     lastCheckedAt: now,
-    message: widgetMessage,
+    message: secretConfigured
+      ? widgetMessage
+      : `${widgetMessage} Visitor session tokens use a per-boot ephemeral secret (set VISITOR_SESSION_SECRET for cross-restart persistence).`,
     details: {
       activeWidgets: widgetCount,
+      visitorSessionSecretConfigured: secretConfigured,
     },
   });
 

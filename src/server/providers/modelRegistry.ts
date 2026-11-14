@@ -103,7 +103,7 @@ export const PROVIDER_CAPABILITIES: Record<ModelProviderId, ProviderCapabilityDe
     conversationalPersonality: true,
     externalResearch: false,
     numericalAnalytics: true,
-    supportedModels: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-1.5-pro'],
+    supportedModels: ['gemini-3.1-flash-lite', 'gemini-4-hydrogen'],
   },
   openai: {
     deepReasoning: true,
@@ -252,7 +252,7 @@ export function routeTaskForAlpha(taskCategory: AlphaTaskCategory, complexity: '
 
   // Default Primary is Gemini (always active in AI Studio environment)
   let primaryProvider: ModelProviderId = 'gemini';
-  let primaryModel = 'gemini-3.5-flash-lite';
+  let primaryModel = 'gemini-4-hydrogen';
   let fallbackProvider: ModelProviderId = 'gemini';
   let fallbackModel = 'gemini-3.1-flash-lite';
   let rationale = 'Default conversational intelligence routing via Gemini';
@@ -272,8 +272,8 @@ export function routeTaskForAlpha(taskCategory: AlphaTaskCategory, complexity: '
       rationale = 'Routed to OpenAI o3-mini for strategic reasoning';
     } else {
       primaryProvider = 'gemini';
-      primaryModel = 'gemini-3.5-flash-lite';
-      rationale = 'Specialist reasoning keys unconfigured; routed to Gemini 3.5 Flash Lite adaptive engine';
+      primaryModel = 'gemini-4-hydrogen';
+      rationale = 'Specialist reasoning keys unconfigured; routed to Gemini 4 Hydrogen adaptive engine';
     }
   } else if (taskCategory === 'SALES_QUALIFICATION' || taskCategory === 'PRODUCT_RECOMMENDATION' || taskCategory === 'PURCHASE_INTENT') {
     if (claudeKey) {
@@ -286,7 +286,7 @@ export function routeTaskForAlpha(taskCategory: AlphaTaskCategory, complexity: '
       rationale = 'Routed to OpenAI GPT-4o for high-intent customer response generation';
     } else {
       primaryProvider = 'gemini';
-      primaryModel = 'gemini-3.5-flash-lite';
+      primaryModel = 'gemini-4-hydrogen';
       rationale = 'Primary Gemini sales intelligence engine';
     }
   } else if (taskCategory === 'RESEARCH_REQUEST') {
@@ -296,7 +296,7 @@ export function routeTaskForAlpha(taskCategory: AlphaTaskCategory, complexity: '
       rationale = 'Routed to Perplexity Sonar for authorized external market research';
     } else {
       primaryProvider = 'gemini';
-      primaryModel = 'gemini-3.5-flash-lite';
+      primaryModel = 'gemini-3.1-flash-lite';
       rationale = 'Perplexity key unconfigured; using grounded Company Brain retrieval via Gemini';
     }
   } else if (taskCategory === 'NUMERICAL_ANALYTICS') {
@@ -306,7 +306,7 @@ export function routeTaskForAlpha(taskCategory: AlphaTaskCategory, complexity: '
       rationale = 'Routed to Grok for business numerical interpretation';
     } else {
       primaryProvider = 'gemini';
-      primaryModel = 'gemini-3.5-flash-lite';
+      primaryModel = 'gemini-4-hydrogen';
       rationale = 'Grok key unconfigured; using deterministic math engine with Gemini interpretation';
     }
   }

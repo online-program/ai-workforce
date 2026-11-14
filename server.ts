@@ -3,7 +3,19 @@ import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { analyzeInquiry, fallbackRuleBasedAnalysis } from './src/server/analyzeHandler.ts';
-import { resolvePublicWidget, handleWidgetChat, handleWidgetChatStream, savePublicWidgetConfig, generateInitialQuickOptions, getUserWidgetConfig, getStoredConversationOwner } from './src/server/widgetHandler.ts';
+import {
+  resolvePublicWidget,
+  handleWidgetChat,
+  handleWidgetChatStream,
+  savePublicWidgetConfig,
+  generateInitialQuickOptions,
+  getUserWidgetConfig,
+  getStoredConversationOwner,
+  getStoredConversationFromMemory,
+  ackStoredConversationMessagesInMemory,
+  conversationMemoryStore,
+  buildConversationMemoryKey,
+} from './src/server/widgetHandler.ts';
 import { runFullSafetyTestSuite, ALL_38_TEST_CASES, executeTestCase } from './src/server/testSuiteEngine.ts';
 import { validateEmailAddress, dispatchEmailViaProvider } from './src/server/emailService.ts';
 import { adminRouter } from './src/server/adminApiRouter.ts';
@@ -59,7 +71,7 @@ async function startServer() {
   if (process.env.NODE_ENV === 'production') {
     const secret = process.env.VISITOR_SESSION_SECRET || process.env.SESSION_SECRET;
     if (!secret || secret.trim().length < 32) {
-      console.warn('[SECURITY] WARNING: VISITOR_SESSION_SECRET is missing or < 32 chars. Chat token issuance will fail in production.');
+      console.warn('[SECURITY] WARNING: VISITOR_SESSION_SECRET is missing or < 32 chars. Using cryptographically random per-boot signing key.');
     }
   }
 
@@ -424,7 +436,7 @@ async function startServer() {
         conversation_id: String(conversation_id),
       });
 
-      return res.json({ success: true, token });
+      return res.json({ success: true, token, visitor_session_token: token });
     } catch (err: any) {
       console.error('Error in POST /api/widget/session:', err);
       return res.status(503).json({ success: false, error: 'Failed to validate conversation or issue visitor session' });
@@ -475,22 +487,47 @@ async function startServer() {
         });
       }
 
-      if (!hasAdminCredentials()) {
-        return res.status(503).json({ success: false, error: 'Database unavailable for conversation sync' });
+      let firestoreFound = false;
+      let convData: any = null;
+      let dbConfirmed = false;
+
+      if (hasAdminCredentials()) {
+        try {
+          const convSnap = await getAdminDb()
+            .collection('users')
+            .doc(tenantId)
+            .collection('conversations')
+            .doc(conversationId)
+            .get();
+          if (convSnap.exists) {
+            firestoreFound = true;
+            convData = convSnap.data() || {};
+          }
+          dbConfirmed = true;
+        } catch (dbErr: any) {
+          const msg = String(dbErr?.message || '');
+          const isPermissionOrUnavail =
+            dbErr?.code === 7 ||
+            dbErr?.code === 14 ||
+            msg.includes('PERMISSION_DENIED') ||
+            msg.includes('UNAVAILABLE');
+          if (!isPermissionOrUnavail) {
+            throw dbErr;
+          }
+        }
       }
 
-      const convSnap = await getAdminDb()
-        .collection('users')
-        .doc(tenantId)
-        .collection('conversations')
-        .doc(conversationId)
-        .get();
-
-      if (!convSnap.exists) {
-        return res.json({ success: true, messages: [], status: 'New' });
+      if (!firestoreFound) {
+        const memConv = getStoredConversationFromMemory(tenantId, conversationId);
+        if (memConv) {
+          convData = memConv;
+        }
       }
 
-      const convData = convSnap.data() || {};
+      if (!convData) {
+        return res.json({ success: true, messages: [], status: 'New', db_confirmed: dbConfirmed });
+      }
+
       if (convData.visitor_id && convData.visitor_id !== verification.payload!.visitor_id) {
         return res.status(403).json({ success: false, error: 'Forbidden: Visitor ownership mismatch', code: 'UNAUTHORIZED_OWNERSHIP' });
       }
@@ -499,6 +536,7 @@ async function startServer() {
         success: true,
         messages: Array.isArray(convData.messages) ? convData.messages : [],
         status: convData.status || 'Active',
+        db_confirmed: dbConfirmed,
         updated_at: convData.updated_at || new Date().toISOString(),
       });
     } catch (err: any) {
@@ -544,61 +582,93 @@ async function startServer() {
         return res.status(statusCode).json({ success: false, error: verification.error, code: verification.code });
       }
 
-      if (!hasAdminCredentials()) {
-        return res.status(503).json({ success: false, error: 'Database unavailable' });
-      }
+      // Always keep memory store updated as fast cache / fallback
+      const memAck = ackStoredConversationMessagesInMemory(
+        tenantId,
+        String(conversation_id),
+        verification.payload!.visitor_id,
+        type,
+        message_ids.map((id: any) => String(id))
+      );
 
-      const convRef = getAdminDb().collection('users').doc(tenantId).collection('conversations').doc(String(conversation_id));
-      const convSnap = await convRef.get();
-      if (!convSnap.exists) {
-        return res.status(404).json({ success: false, error: 'Conversation not found' });
-      }
-
-      const convData = convSnap.data() || {};
-      if (convData.visitor_id && convData.visitor_id !== verification.payload!.visitor_id) {
+      if (!memAck.ownershipOk) {
         return res.status(403).json({ success: false, error: 'Forbidden: Visitor ownership mismatch', code: 'UNAUTHORIZED_OWNERSHIP' });
       }
 
-      const targetIds = new Set(message_ids.map((id: any) => String(id)));
-      const now = new Date().toISOString();
-      let updatedCount = 0;
+      let firestoreFound = false;
+      let dbConfirmed = false;
+      let updatedCount = memAck.updatedCount;
 
-      const existingMessages = Array.isArray(convData.messages) ? convData.messages : [];
-      const updatedMessages = existingMessages.map((m: any) => {
-        if (!m.message_id || !targetIds.has(String(m.message_id))) return m;
-        const meta = { ...(m.metadata || {}) };
-        let changed = false;
+      if (hasAdminCredentials()) {
+        try {
+          const convRef = getAdminDb().collection('users').doc(tenantId).collection('conversations').doc(String(conversation_id));
+          const convSnap = await convRef.get();
+          if (convSnap.exists) {
+            firestoreFound = true;
+            const convData = convSnap.data() || {};
+            if (convData.visitor_id && convData.visitor_id !== verification.payload!.visitor_id) {
+              return res.status(403).json({ success: false, error: 'Forbidden: Visitor ownership mismatch', code: 'UNAUTHORIZED_OWNERSHIP' });
+            }
 
-        if (type === 'delivered' && !meta.delivered) {
-          meta.delivered = true;
-          meta.delivered_at = meta.delivered_at || now;
-          changed = true;
-        }
-        if (type === 'read') {
-          if (!meta.delivered) {
-            meta.delivered = true;
-            meta.delivered_at = meta.delivered_at || now;
-            changed = true;
+            const targetIds = new Set(message_ids.map((id: any) => String(id)));
+            const now = new Date().toISOString();
+            let fsUpdatedCount = 0;
+
+            const existingMessages = Array.isArray(convData.messages) ? convData.messages : [];
+            const updatedMessages = existingMessages.map((m: any) => {
+              if (!m.message_id || !targetIds.has(String(m.message_id))) return m;
+              const meta = { ...(m.metadata || {}) };
+              let changed = false;
+
+              if (type === 'delivered' && !meta.delivered) {
+                meta.delivered = true;
+                meta.delivered_at = meta.delivered_at || now;
+                changed = true;
+              }
+              if (type === 'read') {
+                if (!meta.delivered) {
+                  meta.delivered = true;
+                  meta.delivered_at = meta.delivered_at || now;
+                  changed = true;
+                }
+                if (!meta.read) {
+                  meta.read = true;
+                  meta.read_at = meta.read_at || now;
+                  changed = true;
+                }
+              }
+
+              if (changed) {
+                fsUpdatedCount++;
+                return { ...m, metadata: meta };
+              }
+              return m;
+            });
+
+            if (fsUpdatedCount > 0) {
+              await convRef.set({ messages: updatedMessages, updated_at: now }, { merge: true });
+            }
+            updatedCount = fsUpdatedCount;
+            dbConfirmed = true;
           }
-          if (!meta.read) {
-            meta.read = true;
-            meta.read_at = meta.read_at || now;
-            changed = true;
+        } catch (dbErr: any) {
+          const msg = String(dbErr?.message || '');
+          const isPermissionOrUnavail =
+            dbErr?.code === 7 ||
+            dbErr?.code === 14 ||
+            msg.includes('PERMISSION_DENIED') ||
+            msg.includes('UNAVAILABLE');
+          if (!isPermissionOrUnavail) {
+            throw dbErr;
           }
         }
-
-        if (changed) {
-          updatedCount++;
-          return { ...m, metadata: meta };
-        }
-        return m;
-      });
-
-      if (updatedCount > 0) {
-        await convRef.set({ messages: updatedMessages, updated_at: now }, { merge: true });
       }
 
-      return res.json({ success: true, updated_count: updatedCount, type });
+      if (!firestoreFound && !memAck.found) {
+        return res.status(404).json({ success: false, error: 'Conversation not found' });
+      }
+
+      return res.json({ success: true, updated_count: updatedCount, type, db_confirmed: dbConfirmed });
     } catch (err: any) {
       console.error('Error in POST /api/widget/conversation/ack:', err);
       return res.status(500).json({ success: false, error: err?.message || 'Failed to acknowledge messages' });
@@ -781,11 +851,11 @@ async function startServer() {
     }
   });
 
-  // Robust Approve & Send API endpoint with idempotency, tenant authorization, and durable conversation message sync
+  // Robust Approve & Send API endpoint with real email dispatch (Gmail/Resend/SendGrid/Postmark), idempotency, tenant authorization, and durable conversation sync
   app.post('/api/inquiries/send-reply', requireAuthenticatedUser(), async (req: AuthenticatedUserRequest, res) => {
     try {
       const body = req.body || {};
-      const { userId, leadId, recipientEmail, replyText } = body;
+      const { userId, leadId, recipientEmail, replyText, subject, senderName, senderEmail, googleAccessToken } = body;
 
       if (!userId || !leadId || !recipientEmail || !replyText) {
         return res.status(400).json({ success: false, error: 'userId, leadId, recipientEmail, and replyText are required' });
@@ -796,98 +866,216 @@ async function startServer() {
         return res.status(403).json({ success: false, error: 'Forbidden: Cannot send reply for another tenant' });
       }
 
-      if (!hasAdminCredentials()) {
-        return res.status(503).json({ success: false, error: 'Database unavailable for durable reply publishing' });
+      let leadData: any = null;
+      let dbReadable = false;
+
+      if (hasAdminCredentials()) {
+        try {
+          const adminDb = getAdminDb();
+          const inquiryRef = adminDb.collection('users').doc(userId).collection('inquiries').doc(leadId);
+          const leadRef = adminDb.collection('users').doc(userId).collection('leads').doc(leadId);
+          const [inqSnap, leadSnap] = await Promise.all([inquiryRef.get(), leadRef.get()]);
+          dbReadable = true;
+          leadData = inqSnap.exists ? inqSnap.data() : (leadSnap.exists ? leadSnap.data() : null);
+        } catch (dbErr: any) {
+          const msg = String(dbErr?.message || '');
+          const isPermOrUnavail = dbErr?.code === 7 || dbErr?.code === 14 || msg.includes('PERMISSION_DENIED');
+          if (!isPermOrUnavail) throw dbErr;
+        }
       }
 
-      const adminDb = getAdminDb();
-      const inquiryRef = adminDb.collection('users').doc(userId).collection('inquiries').doc(leadId);
-      const leadRef = adminDb.collection('users').doc(userId).collection('leads').doc(leadId);
-      const [inqSnap, leadSnap] = await Promise.all([inquiryRef.get(), leadRef.get()]);
+      // Allow lookup fallback from memory conversation if Admin SDK Firestore lacks IAM permissions
+      const derivedConvId =
+        leadData?.conversation_id ||
+        (String(leadId).startsWith('inq_') || String(leadId).startsWith('lead-') || String(leadId).startsWith('lead_')
+          ? String(leadId).replace(/^inq_/, '').replace(/^lead[-_]/, '')
+          : undefined);
+      const memConv = derivedConvId ? getStoredConversationFromMemory(userId, derivedConvId) : undefined;
 
-      const leadData = inqSnap.exists ? inqSnap.data() : (leadSnap.exists ? leadSnap.data() : null);
-      if (!leadData) {
+      if (dbReadable && !leadData && !memConv) {
         return res.status(404).json({ success: false, error: `Inquiry or lead record '${leadId}' not found for tenant.` });
       }
 
-      // Idempotency Check: return stored reply if already published
-      if (leadData.reply_published === true || leadData.draft_reply === replyText && leadData.status === 'Waiting for Customer') {
+      // Idempotency Check: return stored reply if already dispatched or published with identical text
+      if (
+        leadData &&
+        (leadData.reply_published === true ||
+          (leadData.draft_reply === replyText && leadData.status === 'Waiting for Customer')) &&
+        (leadData.email_dispatched === true || !googleAccessToken)
+      ) {
         return res.json({
           success: true,
-          status: 'published',
-          published: true,
-          email_dispatched: false,
+          status: leadData.email_dispatched ? 'accepted' : 'published',
+          published: Boolean(leadData.reply_published),
+          email_dispatched: Boolean(leadData.email_dispatched),
+          email_status: leadData.email_status || (leadData.email_dispatched ? 'accepted' : 'not_sent_conversation_only'),
           already_sent: true,
-          sent_at: leadData.reply_published_at || leadData.updated_at || new Date().toISOString(),
-          provider: 'direct_conversation_publish',
+          sent_at: leadData.email_dispatched_at || leadData.reply_published_at || leadData.updated_at || new Date().toISOString(),
+          provider: leadData.email_provider || 'direct_conversation_publish',
+          email_provider: leadData.email_provider,
+          provider_message_id: leadData.provider_message_id,
           recipient: recipientEmail,
         });
       }
 
+      const hasEmailTransportConfigured = Boolean(
+        (googleAccessToken && String(googleAccessToken).trim()) ||
+          process.env.RESEND_API_KEY?.trim() ||
+          process.env.SENDGRID_API_KEY?.trim() ||
+          process.env.POSTMARK_SERVER_TOKEN?.trim()
+      );
+
+      let emailDispatched = false;
+      let emailStatus = 'not_sent_conversation_only';
+      let emailProvider = 'direct_conversation_publish';
+      let providerMessageId: string | undefined;
+      let emailError: string | undefined;
       const now = new Date().toISOString();
-      const updatePayload = {
-        status: 'Waiting for Customer',
-        draft_reply: replyText,
-        suggested_reply: replyText,
-        reply_published: true,
-        reply_published_at: now,
-        email_dispatched: false,
-        email_status: 'not_sent_conversation_only',
-        email_recipient: recipientEmail,
-        email_provider: 'direct_conversation_publish',
-        updated_at: now,
-      };
 
-      const dbWrites: Promise<any>[] = [
-        inquiryRef.set(updatePayload, { merge: true }),
-        leadRef.set(updatePayload, { merge: true }),
-      ];
+      if (hasEmailTransportConfigured) {
+        const emailResult = await dispatchEmailViaProvider({
+          to: String(recipientEmail).trim(),
+          subject: String(subject || 'Regarding your inquiry'),
+          bodyText: String(replyText),
+          fromName: senderName ? String(senderName) : undefined,
+          fromEmail: senderEmail ? String(senderEmail) : authUser.email,
+          googleAccessToken: googleAccessToken ? String(googleAccessToken) : undefined,
+        });
 
-      // Push message to live conversation history so visitor sees it in website widget
-      const conversationId = leadData.conversation_id || leadId.replace(/^inq_/, '').replace(/^lead_/, '');
+        if (!emailResult.success) {
+          return res.status(emailResult.errorType === 'provider_rejected' ? 502 : 400).json({
+            success: false,
+            status: 'failed',
+            email_dispatched: false,
+            email_status: 'failed',
+            error_type: emailResult.errorType,
+            error: emailResult.failure_reason || 'Email dispatch was rejected by provider.',
+            recipient: recipientEmail,
+          });
+        }
+
+        emailDispatched = true;
+        emailStatus = 'accepted';
+        emailProvider = emailResult.provider || 'email';
+        providerMessageId = emailResult.provider_message_id;
+      }
+
+      const conversationId = leadData?.conversation_id || derivedConvId;
       let publishedMessageId: string | undefined;
-      if (conversationId) {
-        const convRef = adminDb.collection('users').doc(userId).collection('conversations').doc(conversationId);
-        const convSnap = await convRef.get();
-        const convData = convSnap.exists ? convSnap.data() : null;
-        const existingMessages = Array.isArray(convData?.messages) ? convData.messages : [];
+      let dbConfirmed = false;
 
-        const alreadyPublished = existingMessages.some((m: any) => m.sender === 'assistant' && m.text === replyText);
-        if (!alreadyPublished) {
+      // Publish assistant reply to in-memory conversation store so visitor widget immediately receives it
+      if (conversationId && memConv) {
+        const alreadyInMem = (memConv.messages || []).some(
+          (m) => m.sender === 'assistant' && m.text === replyText
+        );
+        if (!alreadyInMem) {
           publishedMessageId = `msg_${crypto.randomUUID()}`;
-          const newMessage = {
+          memConv.messages.push({
             message_id: publishedMessageId,
             sender: 'assistant',
             text: replyText,
             timestamp: now,
-            approved_by: authUser.email || authUser.uid,
             metadata: { published: true, published_at: now, delivered: false, read: false, approved_dispatch: true },
-          };
-
-          dbWrites.push(
-            convRef.set(
-              {
-                messages: [...existingMessages, newMessage],
-                last_message_at: now,
-                status: 'Waiting for Customer',
-                updated_at: now,
-              },
-              { merge: true }
-            )
-          );
+          });
+          memConv.status = 'Waiting for Customer';
+          memConv.updated_at = now;
+          memConv.last_message_at = now;
         }
       }
 
-      const taskRef = adminDb.collection('users').doc(userId).collection('tasks').doc(`task-${leadId}`);
-      dbWrites.push(taskRef.set({ status: 'completed', completed_at: now, updated_at: now }, { merge: true }));
+      const updatePayload: Record<string, any> = {
+        status: 'Waiting for Customer',
+        draft_reply: replyText,
+        suggested_reply: replyText,
+        reply_published: Boolean(conversationId),
+        reply_published_at: now,
+        email_dispatched: emailDispatched,
+        email_status: emailStatus,
+        ...(emailDispatched ? { email_dispatched_at: now } : {}),
+        ...(providerMessageId ? { provider_message_id: providerMessageId } : {}),
+        ...(emailError ? { email_error: emailError } : {}),
+        email_recipient: recipientEmail,
+        email_provider: emailProvider,
+        updated_at: now,
+      };
 
-      await Promise.all(dbWrites);
+      if (hasAdminCredentials() && dbReadable) {
+        try {
+          const adminDb = getAdminDb();
+          const inquiryRef = adminDb.collection('users').doc(userId).collection('inquiries').doc(leadId);
+          const leadRef = adminDb.collection('users').doc(userId).collection('leads').doc(leadId);
+          const dbWrites: Promise<any>[] = [
+            inquiryRef.set(updatePayload, { merge: true }),
+            leadRef.set(updatePayload, { merge: true }),
+          ];
+
+          if (conversationId) {
+            const convRef = adminDb.collection('users').doc(userId).collection('conversations').doc(conversationId);
+            const convSnap = await convRef.get();
+            const convData = convSnap.exists ? convSnap.data() : null;
+            const existingMessages = Array.isArray(convData?.messages) ? convData.messages : [];
+
+            const alreadyPublished = existingMessages.some((m: any) => m.sender === 'assistant' && m.text === replyText);
+            if (!alreadyPublished) {
+              publishedMessageId = publishedMessageId || `msg_${crypto.randomUUID()}`;
+              const newMessage = {
+                message_id: publishedMessageId,
+                sender: 'assistant',
+                text: replyText,
+                timestamp: now,
+                approved_by: authUser.email || authUser.uid,
+                metadata: { published: true, published_at: now, delivered: false, read: false, approved_dispatch: true },
+              };
+
+              dbWrites.push(
+                convRef.set(
+                  {
+                    messages: [...existingMessages, newMessage],
+                    last_message_at: now,
+                    status: 'Waiting for Customer',
+                    updated_at: now,
+                  },
+                  { merge: true }
+                )
+              );
+            }
+          }
+
+          const taskRef = adminDb.collection('users').doc(userId).collection('tasks').doc(`task-${leadId}`);
+          dbWrites.push(taskRef.set({ status: 'completed', completed_at: now, updated_at: now }, { merge: true }));
+
+          await Promise.all(dbWrites);
+          dbConfirmed = true;
+        } catch (dbWriteErr: any) {
+          const msg = String(dbWriteErr?.message || '');
+          const isPermOrUnavail = dbWriteErr?.code === 7 || dbWriteErr?.code === 14 || msg.includes('PERMISSION_DENIED');
+          if (!isPermOrUnavail) throw dbWriteErr;
+        }
+      }
+
+      if (!emailDispatched && !conversationId && !memConv) {
+        return res.status(422).json({
+          success: false,
+          status: 'failed',
+          email_dispatched: false,
+          email_status: 'provider_not_configured',
+          error_type: 'provider_not_configured',
+          error:
+            'No outbound email provider is configured (connect Gmail or configure RESEND_API_KEY, SENDGRID_API_KEY, or POSTMARK_SERVER_TOKEN) and no live visitor conversation exists for this inquiry.',
+        });
+      }
 
       return res.json({
         success: true,
-        status: 'published',
-        published: true,
-        email_dispatched: false,
+        status: emailDispatched ? 'accepted' : 'published',
+        published: Boolean(conversationId),
+        email_dispatched: emailDispatched,
+        email_status: emailStatus,
+        email_provider: emailDispatched ? emailProvider : undefined,
+        provider: emailProvider,
+        provider_message_id: providerMessageId,
+        db_confirmed: dbConfirmed,
         delivered: false,
         read: false,
         message_id: publishedMessageId,

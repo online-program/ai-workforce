@@ -53,6 +53,7 @@
   var convKey = 'aiw_conv_' + widgetId;
   var msgsKey = 'aiw_msgs_' + widgetId;
   var profileKey = 'aiw_prof_' + widgetId;
+  var tokenKey = 'aiw_vtok_' + widgetId + '_' + visitorId;
 
   var visitorId = '';
   try {
@@ -64,6 +65,7 @@
   } catch (e) {
     visitorId = 'vis_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
   }
+  tokenKey = 'aiw_vtok_' + widgetId + '_' + visitorId;
 
   var conversationId = '';
   try {
@@ -75,6 +77,11 @@
   } catch (e) {
     conversationId = 'conv_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
   }
+
+  var storedVisitorToken = '';
+  try {
+    storedVisitorToken = sessionStorage.getItem(tokenKey) || '';
+  } catch (e) {}
 
   // 3. Live Widget State
   var defaultQuickOptions = [
@@ -96,6 +103,7 @@
     isTyping: false,
     loaded: false,
     currentLeadId: null,
+    visitorToken: storedVisitorToken || null,
   };
 
   // 4. Create Host Container & Shadow Root for full CSS isolation
@@ -943,6 +951,47 @@
       });
   }
 
+  function rotateConversationId() {
+    conversationId = 'conv_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    state.visitorToken = null;
+    try {
+      sessionStorage.setItem(convKey, conversationId);
+      sessionStorage.removeItem(tokenKey);
+    } catch (e) {}
+  }
+
+  function ensureVisitorToken(forceRefresh) {
+    if (state.visitorToken && !forceRefresh) {
+      return Promise.resolve(state.visitorToken);
+    }
+    return fetch(hostOrigin + '/api/widget/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        widget_id: widgetId,
+        conversation_id: conversationId,
+        visitor_id: visitorId,
+      }),
+    })
+      .then(function (res) {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then(function (data) {
+        if (data && data.success && data.token) {
+          state.visitorToken = data.token;
+          try {
+            sessionStorage.setItem(tokenKey, data.token);
+          } catch (e) {}
+          return data.token;
+        }
+        return null;
+      })
+      .catch(function () {
+        return null;
+      });
+  }
+
   // 10. Send Chat Message over API
   function sendMessage(text) {
     if (!text || !text.trim() || state.isTyping) return;
@@ -961,29 +1010,64 @@
       return { sender: m.sender, text: m.text, timestamp: m.timestamp };
     });
 
-    fetch(hostOrigin + '/api/widget/chat', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        widget_id: widgetId,
-        conversation_id: conversationId,
-        visitor_id: visitorId,
-        user_id: configuredUserId || undefined,
-        lead_id: state.currentLeadId || undefined,
-        message: userText,
-        message_history: historyPayload,
-        existing_profile: state.existingProfile || undefined,
-        environment: 'production',
-      }),
-    })
+    function postChat(token) {
+      var headers = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['x-visitor-token'] = token;
+      }
+      return fetch(hostOrigin + '/api/widget/chat', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({
+          widget_id: widgetId,
+          conversation_id: conversationId,
+          visitor_id: visitorId,
+          visitor_session_token: token || undefined,
+          user_id: configuredUserId || undefined,
+          lead_id: state.currentLeadId || undefined,
+          message: userText,
+          message_history: historyPayload,
+          existing_profile: state.existingProfile || undefined,
+          environment: 'production',
+        }),
+      });
+    }
+
+    ensureVisitorToken(false)
+      .then(function (token) {
+        return postChat(token);
+      })
+      .then(function (res) {
+        if (res.status === 401 || res.status === 403) {
+          return res
+            .json()
+            .catch(function () {
+              return {};
+            })
+            .then(function (errBody) {
+              var code = errBody && errBody.code ? String(errBody.code) : '';
+              if (code === 'UNAUTHORIZED_OWNERSHIP') {
+                rotateConversationId();
+              }
+              return ensureVisitorToken(true).then(function (freshToken) {
+                return postChat(freshToken);
+              });
+            });
+        }
+        return res;
+      })
       .then(function (res) {
         if (!res.ok) throw new Error('HTTP error ' + res.status);
         return res.json();
       })
       .then(function (data) {
         state.isTyping = false;
+        if (data && data.visitor_session_token) {
+          state.visitorToken = data.visitor_session_token;
+          try {
+            sessionStorage.setItem(tokenKey, data.visitor_session_token);
+          } catch (e) {}
+        }
         if (data && data.inquiry_id) {
           state.currentLeadId = data.inquiry_id;
         }
@@ -996,7 +1080,7 @@
         if (data && data.reply) {
           addMessage('assistant', data.reply, data.options);
         } else {
-          addMessage('assistant', 'Thank you for reaching out! Our sales team will get back to you shortly.');
+          addMessage('assistant', 'I hit a temporary response error. Please try sending your message again.');
         }
       })
       .catch(function (err) {
@@ -1004,7 +1088,7 @@
         state.isTyping = false;
         addMessage(
           'assistant',
-          'Thank you! We received your message and our sales team will follow up with you shortly.'
+          'Could not connect to the assistant right now. Please try sending your message again.'
         );
       });
   }

@@ -269,7 +269,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
     { id: 'overview', label: 'Overview', icon: LayoutDashboard, hide: permissions.canViewAnalytics === false },
     { id: 'marketing', label: 'Marketing Co-Founder', icon: Megaphone },
     { id: 'live-activity', label: 'Live Activity', icon: Activity, hide: permissions.canViewLiveActivity === false },
-    { id: 'visitors', label: 'Visitors', icon: Users, count: visitors.length, hide: permissions.canViewUsers === false },
+    { id: 'visitors', label: 'Visitors', icon: Users, count: visitors.length, hide: permissions.canViewAnalytics === false },
     { id: 'users', label: 'Users', icon: Users, count: usersList.length, hide: permissions.canViewUsers === false },
     { id: 'companies', label: 'Companies', icon: Building2, count: companies.length, hide: permissions.canViewCompanies === false },
     { id: 'widgets', label: 'Widgets', icon: Cpu, count: widgets.length, hide: permissions.canViewWidgets === false },

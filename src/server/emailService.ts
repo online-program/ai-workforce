@@ -288,6 +288,50 @@ export async function dispatchEmailViaProvider(payload: SendEmailPayload): Promi
 
   const providerErrors: string[] = [];
 
+  // 1. Check for Google Workspace / Gmail API OAuth token
+  if (googleAccessToken && googleAccessToken.trim()) {
+    try {
+      const rawEmail = buildRfc822Email(
+        to,
+        subject,
+        bodyText,
+        bodyHtml,
+        fromEmail ? fullFrom : undefined
+      );
+      const encodedMessage = base64UrlEncode(rawEmail);
+
+      const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${googleAccessToken.trim()}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ raw: encodedMessage }),
+      });
+
+      const resData: any = await res.json().catch(() => ({}));
+      if (res.ok) {
+        return {
+          success: true,
+          status: 'accepted',
+          recipient: to,
+          provider: 'gmail',
+          provider_message_id: resData.id || `gmail_${Date.now()}`,
+          sent_at: new Date().toISOString(),
+        };
+      } else {
+        const errorMsg =
+          resData?.error?.message ||
+          (res.status === 401
+            ? 'Gmail access token expired or revoked. Please reconnect Gmail.'
+            : `Gmail API rejected email (${res.status})`);
+        providerErrors.push(`Gmail: ${errorMsg}`);
+      }
+    } catch (err: any) {
+      providerErrors.push(`Gmail: ${err?.message || err}`);
+    }
+  }
+
   // 2. Check for Resend Provider (RESEND_API_KEY)
   const resendApiKey = process.env.RESEND_API_KEY;
   if (resendApiKey && resendApiKey.trim()) {

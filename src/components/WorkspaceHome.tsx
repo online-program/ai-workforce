@@ -20,7 +20,7 @@ import { WidgetStudio } from './WidgetStudio.tsx';
 import { WebsiteChatTab } from './WebsiteChatTab.tsx';
 import { AlphaConfigurationModal } from './AlphaConfigurationModal.tsx';
 import { LiveWidgetPreviewModal } from './LiveWidgetPreviewModal.tsx';
-import { getWidgetConfig, saveWidgetConfig, getOrCreateWidgetId } from '../services/workspaceService.ts';
+import { getWidgetConfig, saveWidgetConfig, getOrCreateWidgetId, subscribeToUserConversations } from '../services/workspaceService.ts';
 import { generateAlphaVisitorGreeting } from '../utils/alphaWelcomeUtils.ts';
 
 interface WorkspaceHomeProps {
@@ -92,49 +92,104 @@ export const WorkspaceHome: React.FC<WorkspaceHomeProps> = ({
     });
   }, [userId, companyProfile]);
 
+  const [realtimeConversations, setRealtimeConversations] = useState<WidgetConversation[]>([]);
+
+  useEffect(() => {
+    if (!userId) {
+      setRealtimeConversations([]);
+      return;
+    }
+    const unsub = subscribeToUserConversations(userId, (userConvs) => {
+      setRealtimeConversations(userConvs || []);
+    });
+    return () => unsub();
+  }, [userId]);
+
   const handleSaveWidgetConfig = async (updated: WidgetConfig) => {
     if (!userId) return;
     const saved = await saveWidgetConfig(userId, updated);
     setWidgetConfig(saved || updated);
   };
 
-  // Build conversations list from leads or real chats
+  // Build conversations list by merging real-time widget conversations with lead records
   const conversationsList: WidgetConversation[] = useMemo(() => {
-    return leads.map((lead) => {
-      const messages = Array.isArray(lead.messages) && lead.messages.length > 0
-        ? lead.messages
-        : [
-            {
-              id: `msg-user-${lead.id}`,
-              sender: 'customer' as const,
-              text: lead.original_message || lead.raw_inquiry || 'Inquiry regarding services',
-              timestamp: lead.created_at,
-            },
-            {
-              id: `msg-alpha-${lead.id}`,
-              sender: 'assistant' as const,
-              text: lead.suggested_reply || lead.draft_reply || 'Thank you for reaching out. How can I help you today?',
-              timestamp: lead.last_action_at || lead.created_at,
-            },
-          ];
+    const convMap = new Map<string, WidgetConversation>();
 
-      return {
-        id: lead.conversation_id || `conv-${lead.id}`,
-        conversation_id: lead.conversation_id || `conv-${lead.id}`,
-        widget_id: (lead as any).widget_id || companyProfile.widget_id || '',
-        user_id: (lead as any).user_id || userId || '',
-        customer_name: lead.customer_name || 'Website Visitor',
-        visitor_id: `vis_${lead.id.substring(0, 8)}`,
-        current_intent: lead.customer_intent || 'Product Inquiry',
-        lead_score: lead.lead_score,
-        intent_score: lead.intent_score || (lead.lead_score === 'HOT' ? 85 : lead.lead_score === 'WARM' ? 55 : 30),
-        status: (lead.status === 'Won' || lead.status === 'Qualified' ? 'Lead' : 'Inquiry') as any,
-        messages,
-        created_at: lead.created_at,
-        updated_at: lead.last_action_at || lead.created_at,
-      };
-    });
-  }, [leads]);
+    for (const conv of realtimeConversations) {
+      const key = conv.conversation_id || conv.id;
+      if (!key) continue;
+      convMap.set(key, {
+        ...conv,
+        id: conv.id || key,
+        conversation_id: key,
+        widget_id: conv.widget_id || companyProfile.widget_id || '',
+        user_id: conv.user_id || userId || '',
+        customer_name: conv.customer_name || 'Website Visitor',
+        visitor_id: conv.visitor_id || 'visitor_anon',
+        messages: Array.isArray(conv.messages) ? conv.messages : [],
+        created_at: conv.created_at || new Date().toISOString(),
+        updated_at: conv.updated_at || (conv as any).last_message_at || conv.created_at || new Date().toISOString(),
+      });
+    }
+
+    for (const lead of leads) {
+      const key = lead.conversation_id || `conv-${lead.id}`;
+      const existing = convMap.get(key);
+      const fallbackMessages =
+        Array.isArray(lead.messages) && lead.messages.length > 0
+          ? lead.messages
+          : [
+              {
+                id: `msg-user-${lead.id}`,
+                sender: 'customer' as const,
+                text: lead.original_message || lead.raw_inquiry || 'Inquiry regarding services',
+                timestamp: lead.created_at,
+              },
+              {
+                id: `msg-alpha-${lead.id}`,
+                sender: 'assistant' as const,
+                text: lead.suggested_reply || lead.draft_reply || 'Thank you for reaching out. How can I help you today?',
+                timestamp: lead.last_action_at || lead.created_at,
+              },
+            ];
+
+      if (existing) {
+        const mergedMessages =
+          Array.isArray(existing.messages) && existing.messages.length >= fallbackMessages.length
+            ? existing.messages
+            : fallbackMessages;
+        convMap.set(key, {
+          ...existing,
+          customer_name: existing.customer_name && existing.customer_name !== 'Website Visitor' ? existing.customer_name : (lead.customer_name || 'Website Visitor'),
+          current_intent: existing.current_intent || lead.customer_intent || 'Product Inquiry',
+          lead_score: existing.lead_score || lead.lead_score,
+          intent_score: existing.intent_score || lead.intent_score || (lead.lead_score === 'HOT' ? 85 : lead.lead_score === 'WARM' ? 55 : 30),
+          status: (lead.status === 'Won' || lead.status === 'Qualified' ? 'Lead' : existing.status || 'Inquiry') as any,
+          messages: mergedMessages,
+        });
+      } else {
+        convMap.set(key, {
+          id: key,
+          conversation_id: key,
+          widget_id: (lead as any).widget_id || companyProfile.widget_id || '',
+          user_id: (lead as any).user_id || userId || '',
+          customer_name: lead.customer_name || 'Website Visitor',
+          visitor_id: `vis_${lead.id.substring(0, 8)}`,
+          current_intent: lead.customer_intent || 'Product Inquiry',
+          lead_score: lead.lead_score,
+          intent_score: lead.intent_score || (lead.lead_score === 'HOT' ? 85 : lead.lead_score === 'WARM' ? 55 : 30),
+          status: (lead.status === 'Won' || lead.status === 'Qualified' ? 'Lead' : 'Inquiry') as any,
+          messages: fallbackMessages,
+          created_at: lead.created_at,
+          updated_at: lead.last_action_at || lead.created_at,
+        });
+      }
+    }
+
+    return Array.from(convMap.values()).sort(
+      (a, b) => new Date(b.updated_at || b.created_at || 0).getTime() - new Date(a.updated_at || a.created_at || 0).getTime()
+    );
+  }, [leads, realtimeConversations, companyProfile.widget_id, userId]);
 
   const springVariants = {
     initial: {
@@ -359,6 +414,7 @@ export const WorkspaceHome: React.FC<WorkspaceHomeProps> = ({
         isOpen={isWidgetPreviewOpen}
         onClose={() => setIsWidgetPreviewOpen(false)}
         companyProfile={companyProfile}
+        widgetId={widgetConfig.widget_id || companyProfile.widget_id || (userId ? getOrCreateWidgetId(userId) : undefined)}
         userId={userId}
         onNavigateToStudio={() => onSelectTab?.('widget_studio')}
       />
