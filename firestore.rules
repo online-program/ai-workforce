@@ -1,0 +1,268 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to check if user is signed in
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper function to verify user operates on their own document/collection
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Helper function to check if caller is an ACTIVE system admin
+    function isSystemAdmin() {
+      return isAuthenticated()
+        && exists(/databases/$(database)/documents/system_admins/$(request.auth.uid))
+        && get(/databases/$(database)/documents/system_admins/$(request.auth.uid)).data.status == 'ACTIVE';
+    }
+
+    // Helper function to check if caller is an ACTIVE CEO or Super Admin
+    function isCeoOrSuperAdmin() {
+      return isSystemAdmin() && (
+        get(/databases/$(database)/documents/system_admins/$(request.auth.uid)).data.role == 'CEO' ||
+        get(/databases/$(database)/documents/system_admins/$(request.auth.uid)).data.role == 'SUPER_ADMIN'
+      );
+    }
+
+    // Reserved official platform widget IDs
+    function isReservedOfficialWidget(widgetId) {
+      return widgetId in [
+        'official-ai-workforce',
+        'ai_workforce_official',
+        'ai_workforce',
+        'ai-workforce',
+        'wgt_8va1xl_re01u0'
+      ];
+    }
+
+    function matchesWidgetOwner(data) {
+      return (data.user_id is string && data.user_id == request.auth.uid)
+        || (data.userId is string && data.userId == request.auth.uid);
+    }
+
+    function hasNoSensitiveWidgetFields(data) {
+      return !('company_profile' in data)
+        && !('humanEscalation' in data)
+        && !('forbiddenBehaviors' in data)
+        && !('commitmentsNeverToMake' in data);
+    }
+
+    // Public guest sessions for Alpha Experience Mode (server-only, no direct client access)
+    match /guest_sessions/{sessionId} {
+      allow read, write: if false;
+    }
+
+    // Server-only internal collections
+    match /widget_lookup/{widgetId} {
+      allow read, write: if false;
+    }
+
+    match /oauth_states/{stateId} {
+      allow read, write: if false;
+    }
+
+    match /notification_outbox/{outboxId} {
+      allow read, write: if false;
+    }
+
+    match /contact_submissions/{submissionId} {
+      allow read: if isSystemAdmin();
+      allow write: if false;
+    }
+
+    match /handoffs/{handoffId} {
+      allow read: if isSystemAdmin();
+      allow write: if false;
+    }
+
+    match /system_config/{docId} {
+      allow read: if isSystemAdmin();
+      allow write: if isCeoOrSuperAdmin();
+    }
+
+    // Public lookup collection for widget config (display projection only, strictly NO private company_profile)
+    match /public_widgets/{widgetId} {
+      allow read: if true;
+      allow create: if isSystemAdmin() || (
+        isAuthenticated()
+        && !isReservedOfficialWidget(widgetId)
+        && hasNoSensitiveWidgetFields(request.resource.data)
+        && matchesWidgetOwner(request.resource.data)
+      );
+      allow update: if isSystemAdmin() || (
+        isAuthenticated()
+        && !isReservedOfficialWidget(widgetId)
+        && hasNoSensitiveWidgetFields(request.resource.data)
+        && resource != null
+        && matchesWidgetOwner(resource.data)
+        && (!('user_id' in request.resource.data) || request.resource.data.user_id == resource.data.user_id)
+        && (!('userId' in request.resource.data) || request.resource.data.userId == resource.data.userId)
+      );
+      allow delete: if isCeoOrSuperAdmin() || (
+        isAuthenticated()
+        && !isReservedOfficialWidget(widgetId)
+        && resource != null
+        && matchesWidgetOwner(resource.data)
+      );
+
+      match /conversation_states/{stateId} {
+        allow read, write: if isAuthenticated() && (
+          request.auth.uid == get(/databases/$(database)/documents/public_widgets/$(widgetId)).data.userId ||
+          request.auth.uid == get(/databases/$(database)/documents/public_widgets/$(widgetId)).data.user_id ||
+          isSystemAdmin()
+        );
+      }
+    }
+
+    // Top-level user workspace document enforcing strict tenant isolation and ownership validation
+    match /users/{userId} {
+      allow read, write: if isOwner(userId) || isSystemAdmin();
+
+      // Persistent conversation state
+      match /conversation_states/{stateId} {
+        allow read: if isOwner(userId) || isSystemAdmin();
+        allow create, update, delete: if isOwner(userId) && (
+          !request.resource.data.keys().hasAll(['userId']) || request.resource.data.userId == userId
+        ) || isSystemAdmin();
+      }
+
+      // Company Brain / Profile per user (strictly protected: readable and editable only by workspace owner or active system admin)
+      match /company_profile/{profileId} {
+        allow read: if isOwner(userId) || isSystemAdmin();
+        allow create, update: if isOwner(userId) && (
+          !request.resource.data.keys().hasAll(['userId']) || request.resource.data.userId == userId
+        ) || isSystemAdmin();
+        allow delete: if isOwner(userId) || isSystemAdmin();
+      }
+
+      // Inquiries per user
+      match /inquiries/{inquiryId} {
+        allow read: if isOwner(userId) || isSystemAdmin();
+        allow create, update: if isOwner(userId) && (
+          !request.resource.data.keys().hasAll(['userId']) || request.resource.data.userId == userId
+        ) || isSystemAdmin();
+        allow delete: if isOwner(userId) || isSystemAdmin();
+      }
+
+      // Leads per user
+      match /leads/{leadId} {
+        allow read: if isOwner(userId) || isSystemAdmin();
+        allow create, update: if isOwner(userId) && (
+          !request.resource.data.keys().hasAll(['userId']) || request.resource.data.userId == userId
+        ) || isSystemAdmin();
+        allow delete: if isOwner(userId) || isSystemAdmin();
+      }
+
+      // Activities log per user
+      match /activities/{activityId} {
+        allow read: if isOwner(userId) || isSystemAdmin();
+        allow create, update: if isOwner(userId) || isSystemAdmin();
+        allow delete: if isOwner(userId) || isSystemAdmin();
+      }
+
+      // Sales tasks per user
+      match /tasks/{taskId} {
+        allow read: if isOwner(userId) || isSystemAdmin();
+        allow create, update: if isOwner(userId) || isSystemAdmin();
+        allow delete: if isOwner(userId) || isSystemAdmin();
+      }
+
+      // Widget settings & configurations per user (private owner config; public sites read /public_widgets projection via API)
+      match /widget_config/{configId} {
+        allow read: if isOwner(userId) || isSystemAdmin();
+        allow create, update, delete: if isOwner(userId) || isSystemAdmin();
+      }
+
+      // Website chat conversations per user
+      match /conversations/{conversationId} {
+        allow read, write: if isOwner(userId) || isSystemAdmin();
+      }
+
+      // Tenant analytics / handoffs / outbox subcollections
+      match /handoffs/{handoffId} {
+        allow read: if isOwner(userId) || isSystemAdmin();
+        allow write: if false;
+      }
+    }
+
+    // System Administration & RBAC Collections
+    match /system_admins/{adminId} {
+      allow read: if isSystemAdmin() || isOwner(adminId);
+      allow write: if isCeoOrSuperAdmin();
+    }
+
+    match /system_admin_assignments/{assignmentId} {
+      allow get: if isSystemAdmin() || (
+        isAuthenticated()
+        && request.auth.token.email_verified == true
+        && resource != null
+        && resource.data.email == request.auth.token.email
+      );
+      allow list: if isSystemAdmin();
+      allow write: if isCeoOrSuperAdmin();
+    }
+
+    match /system_admin_invitations/{invitationId} {
+      allow get: if isSystemAdmin() || (
+        isAuthenticated()
+        && request.auth.token.email_verified == true
+        && resource != null
+        && resource.data.email == request.auth.token.email
+      );
+      allow list: if isSystemAdmin();
+      allow write: if isCeoOrSuperAdmin();
+    }
+
+    match /system_settings/{settingId} {
+      allow read: if isSystemAdmin();
+      allow write: if isCeoOrSuperAdmin();
+    }
+
+    match /system_audit_logs/{logId} {
+      allow read: if isSystemAdmin();
+      allow write: if false;
+    }
+
+    match /system_security_events/{eventId} {
+      allow read: if isSystemAdmin();
+      allow write: if false;
+    }
+
+    match /system_health_probes/{probeId} {
+      allow read: if isSystemAdmin();
+      allow write: if isSystemAdmin();
+    }
+
+    match /system_visitor_sessions/{sessionId} {
+      allow read: if isSystemAdmin();
+      allow write: if false;
+    }
+
+    match /marketing_brain/{docId} {
+      allow read: if isSystemAdmin();
+      allow write: if isCeoOrSuperAdmin();
+    }
+
+    match /marketing_research/{docId} {
+      allow read: if isSystemAdmin();
+      allow write: if isSystemAdmin();
+    }
+
+    match /marketing_content/{docId} {
+      allow read: if isSystemAdmin();
+      allow write: if isSystemAdmin();
+    }
+
+    match /marketing_settings/{docId} {
+      allow read: if isSystemAdmin();
+      allow write: if isCeoOrSuperAdmin();
+    }
+
+    match /marketing_audit_logs/{docId} {
+      allow read: if isSystemAdmin();
+      allow write: if false;
+    }
+  }
+}

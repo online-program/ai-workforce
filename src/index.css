@@ -1,0 +1,501 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --background: #FFFFFF;
+    --background-secondary: #F7F7F5;
+    --surface: #FFFFFF;
+    --surface-elevated: #FFFFFF;
+    --surface-hover: #F2F2EE;
+    --surface-sunken: #EDEDE8;
+
+    --primary-gold: #111111;
+    --gold-highlight: #262626;
+    --gold-glow: rgba(17, 17, 17, 0.12);
+
+    --text-primary: #111111;
+    --text-secondary: #686868;
+    --text-muted: #8E8E8E;
+    --text-inverse: #FFFFFF;
+
+    --border: #E5E5E0;
+    --border-subtle: #ECECE7;
+    --border-strong: #D1D1CB;
+
+    --input-background: #F7F7F5;
+    --input-text: #111111;
+    --input-placeholder: #8E8E8E;
+
+    --button-primary-background: #111111;
+    --button-primary-text: #FFFFFF;
+    --button-secondary-background: #F7F7F5;
+    --button-secondary-text: #111111;
+
+    --button-gold-background: #111111;
+    --button-gold-text: #FFFFFF;
+
+    --user-message-background: #111111;
+    --user-message-text: #FFFFFF;
+
+    --agent-message-background: #F7F7F5;
+    --agent-message-text: #111111;
+
+    --link: #111111;
+    --link-hover: #404040;
+
+    --success: #15803D;
+    --warning: #D97706;
+    --error: #DC2626;
+
+    --focus-ring: #111111;
+
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    --shadow-strong: 0 10px 30px -5px rgba(0, 0, 0, 0.08);
+
+    --background-primary: #FFFFFF;
+    --background-card: #FFFFFF;
+    --background-elevated: #FFFFFF;
+    --background-subtle: #F7F7F5;
+    --text-subtle: #8E8E8E;
+    --border-default: #E5E5E0;
+    --color-surface-glass: rgba(255, 255, 255, 0.92);
+    --color-surface-glass-border: rgba(229, 229, 224, 0.85);
+    --accent-glow: rgba(17, 17, 17, 0.08);
+    --accent-gold: #111111;
+    --accent-gold-soft: #F2F2EE;
+    --accent-gold-glow: rgba(17, 17, 17, 0.12);
+  }
+
+  .dark {
+    --background: #050505;
+    --background-secondary: #0A0A0A;
+    --surface: #111111;
+    --surface-elevated: #171717;
+    --surface-hover: #1F1F1F;
+    --surface-sunken: #050505;
+
+    --primary-gold: #FFFFFF;
+    --gold-highlight: #F5F5F5;
+    --gold-glow: rgba(255, 255, 255, 0.18);
+
+    --text-primary: #FFFFFF;
+    --text-secondary: #A1A1AA;
+    --text-muted: #71717A;
+    --text-inverse: #050505;
+
+    --border: rgba(255, 255, 255, 0.10);
+    --border-subtle: rgba(255, 255, 255, 0.06);
+    --border-strong: rgba(255, 255, 255, 0.18);
+
+    --input-background: #111111;
+    --input-text: #FFFFFF;
+    --input-placeholder: #71717A;
+
+    --button-primary-background: #FFFFFF;
+    --button-primary-text: #050505;
+    --button-secondary-background: #171717;
+    --button-secondary-text: #FFFFFF;
+
+    --button-gold-background: #FFFFFF;
+    --button-gold-text: #050505;
+
+    --user-message-background: #FFFFFF;
+    --user-message-text: #050505;
+
+    --agent-message-background: #171717;
+    --agent-message-text: #FFFFFF;
+
+    --link: #FFFFFF;
+    --link-hover: #D4D4D8;
+
+    --success: #22C55E;
+    --warning: #F59E0B;
+    --error: #EF4444;
+
+    --focus-ring: #FFFFFF;
+
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+    --shadow-strong: 0 12px 36px -4px rgba(0, 0, 0, 0.8);
+
+    --background-primary: #050505;
+    --background-card: #111111;
+    --background-elevated: #171717;
+    --background-subtle: #0A0A0A;
+    --text-subtle: #71717A;
+    --border-default: rgba(255, 255, 255, 0.10);
+    --color-surface-glass: rgba(17, 17, 17, 0.88);
+    --color-surface-glass-border: rgba(255, 255, 255, 0.10);
+    --accent-glow: rgba(255, 255, 255, 0.08);
+    --accent-gold: #FFFFFF;
+    --accent-gold-soft: #171717;
+    --accent-gold-glow: rgba(255, 255, 255, 0.18);
+  }
+
+  /* Luxury Gold Signature Utility Classes */
+  .bg-gold {
+    background-color: var(--primary-gold);
+  }
+
+  .text-gold {
+    color: var(--primary-gold);
+  }
+
+  .border-gold {
+    border-color: var(--primary-gold);
+  }
+
+  .border-gold-subtle {
+    border-color: var(--gold-glow);
+  }
+
+  .glow-gold {
+    box-shadow: 0 0 24px var(--gold-glow);
+  }
+
+  .glow-gold-lg {
+    box-shadow: 0 0 40px var(--gold-glow), 0 0 12px var(--gold-glow);
+  }
+
+  .gold-gradient-text {
+    background: linear-gradient(135deg, var(--gold-highlight) 0%, var(--primary-gold) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .gold-gradient-bg {
+    background: linear-gradient(135deg, var(--gold-highlight) 0%, var(--primary-gold) 100%);
+  }
+
+  .gold-border-glow {
+    border-color: var(--primary-gold);
+    box-shadow: 0 0 16px var(--gold-glow);
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+    background-color: var(--background-primary);
+    color: var(--text-primary);
+  }
+
+  body {
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: var(--background-primary);
+    color: var(--text-primary);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, h4 {
+    letter-spacing: -0.025em;
+  }
+
+  /* Accessible focus indicators */
+  :focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+  }
+}
+
+/* Clean ambient backgrounds without GPU-heavy continuous loops */
+.ambient-bg {
+  background-color: #ffffff;
+}
+
+.dark .ambient-bg,
+html.dark .ambient-bg {
+  background-color: #070709;
+}
+
+.ambient-grid {
+  background-size: 32px 32px;
+  background-image: 
+    linear-gradient(to right, rgba(0, 0, 0, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+}
+
+.dark .ambient-grid,
+html.dark .ambient-grid {
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}
+
+/* Crisp, performant surface classes */
+.glass-panel {
+  background-color: #ffffff;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.dark .glass-panel,
+html.dark .glass-panel {
+  background-color: #0d0d10;
+  border: 1px solid rgba(38, 38, 38, 0.9);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.glass-panel-subtle {
+  background-color: #ffffff;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+}
+
+.dark .glass-panel-subtle,
+html.dark .glass-panel-subtle {
+  background-color: #121216;
+  border: 1px solid rgba(38, 38, 38, 0.8);
+}
+
+.glass-nav {
+  background-color: rgba(255, 255, 255, 0.98);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.9);
+}
+
+.dark .glass-nav,
+html.dark .glass-nav {
+  background-color: rgba(7, 7, 9, 0.98);
+  border-bottom: 1px solid rgba(38, 38, 38, 0.9);
+}
+
+/* Card Styles */
+.dark-glow-card {
+  background-color: #ffffff;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.dark .dark-glow-card,
+html.dark .dark-glow-card {
+  background-color: #0d0d10;
+  border: 1px solid rgba(38, 38, 38, 0.9);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+/* Accent Badges */
+.glow-badge-cyan {
+  background-color: rgba(6, 182, 212, 0.08);
+  color: #0284c7;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.glow-badge-emerald {
+  background-color: rgba(16, 185, 129, 0.08);
+  color: #059669;
+  border: 1px solid rgba(52, 211, 153, 0.3);
+}
+
+.glow-badge-amber {
+  background-color: rgba(245, 158, 11, 0.08);
+  color: #d97706;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+/* Micro-interaction Hover Cards & Buttons */
+@media (hover: hover) and (pointer: fine) {
+  .interactive-card {
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  }
+
+  .interactive-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    border-color: rgba(203, 213, 225, 0.9);
+  }
+
+  .interactive-button {
+    transition: transform 0.1s ease, background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+  }
+  .interactive-button:hover {
+    transform: translateY(-1px);
+  }
+  .interactive-button:active {
+    transform: translateY(0px) scale(0.99);
+  }
+}
+
+/* Primary Button */
+.glow-btn-primary {
+  position: relative;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+.glow-btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+.glow-btn-primary:active {
+  transform: translateY(0px) scale(0.99);
+}
+
+.dark .glow-btn-primary,
+html.dark .glow-btn-primary {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+.dark .glow-btn-primary:hover,
+html.dark .glow-btn-primary:hover {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+
+/* Clean Lightweight 3D Product Canvas */
+.perspective-stage {
+  perspective: 1200px;
+}
+.product-board-3d {
+  transform: rotateX(2deg) rotateY(-1deg) translateZ(0);
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s ease;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+.perspective-stage:hover .product-board-3d,
+.product-board-3d:hover {
+  transform: rotateX(0deg) rotateY(0deg) translate3d(0, -4px, 16px);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15);
+}
+.dark .perspective-stage:hover .product-board-3d,
+.dark .product-board-3d:hover {
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .perspective-stage {
+    perspective: none;
+  }
+  .product-board-3d {
+    transform: none !important;
+    transition: none !important;
+  }
+}
+
+/* Entrance Animations */
+@keyframes hero-fade-up {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-hero-reveal {
+  animation: hero-fade-up 0.35s ease-out forwards;
+}
+
+.animate-hero-reveal-delay-1 {
+  animation: hero-fade-up 0.35s ease-out 0.05s forwards;
+  opacity: 0;
+}
+
+.animate-hero-reveal-delay-2 {
+  animation: hero-fade-up 0.35s ease-out 0.1s forwards;
+  opacity: 0;
+}
+
+.animate-hero-reveal-delay-3 {
+  animation: hero-fade-up 0.35s ease-out 0.15s forwards;
+  opacity: 0;
+}
+
+/* Custom Clean Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(203, 213, 225, 0.7);
+  border-radius: 9999px;
+}
+
+.dark ::-webkit-scrollbar-thumb,
+html.dark ::-webkit-scrollbar-thumb {
+  background: rgba(64, 64, 64, 0.7);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.9);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover,
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(115, 115, 115, 0.9);
+}
+
+/* Motion Preferences */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-ambient-1,
+  .animate-ambient-2 {
+    animation: none !important;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* High-Contrast Accessible Markdown Typography for Embedded Chat Widget     */
+/* Eliminates white bold text on light backgrounds & guarantees WCAG AAA       */
+/* -------------------------------------------------------------------------- */
+.aiw-formatted-message {
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.aiw-formatted-message strong,
+.aiw-formatted-message b {
+  font-weight: 700 !important;
+  color: var(--msg-strong, currentColor) !important;
+}
+
+.aiw-formatted-message h1,
+.aiw-formatted-message h2,
+.aiw-formatted-message h3,
+.aiw-formatted-message h4,
+.aiw-formatted-message h5,
+.aiw-formatted-message h6 {
+  font-weight: 700 !important;
+  color: var(--msg-heading, currentColor) !important;
+  line-height: 1.35;
+}
+
+.aiw-formatted-message p {
+  color: inherit;
+}
+
+.aiw-formatted-message a {
+  color: var(--msg-link, #0284c7) !important;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.aiw-formatted-message a:hover {
+  opacity: 0.85;
+}
+
+.aiw-formatted-message code {
+  background-color: var(--msg-code-bg, rgba(125, 125, 125, 0.15)) !important;
+  color: var(--msg-code-fg, inherit) !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.aiw-formatted-message blockquote {
+  border-left-width: 2px;
+  border-left-color: var(--msg-strong, #64748b);
+  opacity: 0.95;
+}
+
+

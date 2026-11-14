@@ -1,0 +1,6 @@
+{
+  "name": "AI Workforce",
+  "description": "AI Workforce official platform. Deploy 24/7 autonomous AI employees and Alpha, the AI Sales Manager with verified Company Brain grounding and zero hallucinations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

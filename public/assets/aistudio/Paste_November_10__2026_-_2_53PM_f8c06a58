@@ -1,0 +1,1071 @@
+# AI WORKFORCE — ALPHA COMPLETE PRODUCTION REPAIR
+## Master Engineering Implementation Directive
+
+You are now acting as the Principal Software Architect, CTO, Senior Full-Stack Engineer, AI Systems Engineer, Database Architect and Security Engineer responsible for bringing AI Workforce's Alpha AI Sales Manager to production-grade reliability.
+
+Your task is to IMPLEMENT the repairs described in this directive across the existing application.
+
+This is not a redesign, a feature brainstorm or a superficial bug-fixing exercise.
+
+You must investigate the existing source code, understand the actual architecture, implement the necessary repairs, run tests, verify integrations and deliver a working, production-ready result.
+
+# 1. PRIMARY OBJECTIVE
+
+Repair Alpha's complete production architecture while preserving its existing functionality.
+
+The objective is to make Alpha reliably capable of:
+
+1. Being installed on external business websites.
+2. Answering visitors using the correct tenant-specific Company Brain.
+3. Understanding natural-language customer intent.
+4. Extracting and validating customer information.
+5. Capturing and durably storing enquiries.
+6. Displaying accurate enquiry records in the business dashboard.
+7. Initiating persistent human handoffs.
+8. Notifying the correct business contact.
+9. Supporting human review and approval.
+10. Sending approved follow-up messages.
+11. Maintaining accurate conversation history.
+12. Operating safely across multiple independent business tenants.
+
+**An enquiry that is acknowledged but not saved is a failed enquiry. A handoff that is generated but never reaches a human is a failed handoff.**
+
+The system must never claim success without evidence of successful execution.
+
+# 2. NON-NEGOTIABLE ENGINEERING RULES
+
+- Preserve the existing application, branding, design system and working functionality.
+- Preserve Experience Mode. It is currently an important demonstration environment and must not regress.
+- Do not remove working Alpha capabilities merely to simplify the implementation.
+- Do not replace the existing Gemini architecture with another model provider.
+- Continue using the existing Google Gemini integration.
+- Never expose Gemini API keys or other secrets in frontend code.
+- Never introduce fake customer data, fabricated testimonials, fabricated integrations or simulated success messages.
+- Never silently discard enquiries or handoffs.
+- Never treat a generated AI response as proof of database persistence.
+- Never treat an email API request as proof that a human reviewed the enquiry.
+- Maintain tenant isolation.
+- Do not introduce broad public Firestore permissions to bypass authentication problems.
+- Do not disable security rules to make functionality work.
+- Do not create duplicate APIs or parallel implementations of existing workflows.
+- Do not hardcode environment-specific credentials.
+- Use backward-compatible migrations wherever possible.
+- Do not leave critical functionality as TODOs or placeholders.
+- If an external integration requires credentials, implement the complete integration and clearly identify the configuration needed.
+- Do not claim a feature is complete unless it has been implemented and tested.
+
+First inspect the current repository and the forensic audit findings. Verify the findings against the current source before modifying anything. The audit is a starting point, not a substitute for examining the actual code.
+
+# 3. PRIORITY ZERO — FIREBASE PERSISTENCE AND SERVER AUTHORIZATION
+
+Address ARCH-001 first.
+
+The audit identified that server modules import the browser Firebase SDK, while Firestore rules require authenticated ownership for tenant-specific writes.
+
+This creates a potentially fundamental persistence failure.
+
+Implement a secure and consistent server-side persistence architecture.
+
+Requirements:
+
+1. Use Firebase Admin SDK for privileged server-side Firestore operations where appropriate.
+2. Initialize Admin SDK exclusively on the server.
+3. Never expose service-account credentials to the frontend.
+4. Keep server authorization explicit.
+5. Verify Firebase ID tokens before protected operations.
+6. Resolve the authenticated tenant from verified identity and server-side permissions, not arbitrary client-supplied tenant IDs.
+7. Validate ownership for every protected database operation.
+8. Public widget requests must be constrained to their verified public widget configuration and permitted tenant operations.
+9. Never allow public widget requests to access arbitrary tenant collections.
+10. Preserve appropriate Firestore security rules for client-side access.
+11. Ensure server-side administrative access does not bypass application-level authorization.
+
+Add automated Firestore emulator tests covering:
+
+- Authorized tenant writes.
+- Unauthorized tenant writes.
+- Cross-tenant reads.
+- Cross-tenant updates.
+- Public widget access.
+- Unauthorized dashboard access.
+- Handoff ownership.
+- Enquiry ownership.
+
+Do not declare this complete until the persistence and authorization tests pass.
+
+# 4. PRIORITY ONE — CREATE ONE CANONICAL ENQUIRY SYSTEM
+
+This is the most important user-facing repair.
+
+The current implementation has inconsistent enquiry handling across streaming and non-streaming paths.
+
+Create one shared, reusable enquiry processing and persistence service.
+
+Suggested architecture:
+
+`validateVisitorInput()`
+→ `classifyVisitorIntent()`
+→ `extractEnquiryFields()`
+→ `validateEnquirySchema()`
+→ `normalizeEnquiry()`
+→ `persistEnquiry()`
+→ `returnPersistenceResult()`
+
+Adapt the names to the existing architecture where appropriate.
+
+Every widget implementation and every chat response mode must use the same underlying enquiry persistence service.
+
+## 4.1 Canonical enquiry schema
+
+Establish one typed, documented canonical schema.
+
+Include:
+
+- inquiry_id
+- tenant_id
+- widget_id
+- conversation_id
+- visitor_id
+- customer_name
+- customer_email
+- customer_phone
+- company_name
+- product_or_service
+- requirement
+- quantity
+- budget
+- timeline
+- location
+- additional_notes
+- original_message
+- intent_type
+- qualification_status
+- enquiry_status
+- source
+- created_at
+- updated_at
+- last_activity_at
+- assigned_to, when applicable
+- metadata
+
+Use nullable or optional fields appropriately.
+
+Do not populate missing fields with invented values.
+
+Do not confuse:
+
+- Customer name with product name.
+- Product with service requirement.
+- Quantity with timeline.
+- Budget with price.
+- Company name with customer name.
+- Contact information with customer identity.
+
+## 4.2 Fix field extraction
+
+Investigate and repair the previously observed corruption:
+
+Input:
+"I want a website for my business."
+
+Incorrect output observed previously:
+Name = Web Development
+Product = 1 week
+Quantity = I want a website
+
+Expected behaviour:
+
+- Product/service: Website development.
+- Requirement: Build a website for the visitor's business.
+- Quantity: Unknown.
+- Timeline: Unknown.
+- Name: Unknown.
+- Contact information: Unknown.
+
+Use structured extraction with explicit schema validation.
+
+The LLM must not be the sole authority for data integrity.
+
+Implement deterministic normalization and validation for:
+
+- Email.
+- Phone.
+- Quantity.
+- Budget.
+- Timeline.
+- Customer name.
+- Company name.
+- Product/service.
+- Requirement.
+
+Use confidence and uncertainty handling where appropriate.
+
+When a field is ambiguous, preserve it as unknown or ask the visitor a clarifying question.
+
+Never silently convert one field into another.
+
+## 4.3 Intent detection
+
+Alpha must distinguish:
+
+- General conversation.
+- Product questions.
+- Pricing questions.
+- Purchase intent.
+- Sales enquiry.
+- Quote request.
+- Contact request.
+- Human handoff request.
+- Customer support request.
+- Incomplete enquiry.
+- Spam or irrelevant input.
+
+Do not create an enquiry for every message.
+
+Do not miss legitimate buying intent because the visitor phrases it informally.
+
+A visitor asking about pricing is not automatically a qualified lead.
+
+A visitor saying "I'm interested" is not necessarily submitting a completed enquiry.
+
+Explicit enquiry registration must be supported even when some contact fields are missing, but the record must clearly identify incomplete information.
+
+## 4.4 Persistence guarantees
+
+- Generate stable enquiry IDs.
+- Make registration idempotent.
+- Prevent accidental duplicates.
+- Preserve the original creation timestamp.
+- Preserve the original message and relevant conversation context.
+- Update only fields that have genuinely changed.
+- Avoid overwriting previously collected contact details with null values.
+- Preserve corrections made by visitors.
+- Use transactions or atomic operations where appropriate.
+- Handle concurrent submissions.
+- Return explicit success, pending or failure states.
+
+Do not acknowledge an enquiry as successfully registered until durable persistence has been confirmed.
+
+If persistence fails:
+
+- Do not falsely claim the enquiry was received.
+- Return a truthful error state.
+- Offer a safe retry.
+- Preserve the conversation so the visitor does not need to repeat everything.
+- Record operational errors without exposing internal details to the visitor.
+
+# 5. REPAIR STREAMING AND NON-STREAMING PARITY
+
+Address ENQ-001, ENQ-004 and PERF-002.
+
+The React customer widget currently uses streaming, but the streaming handler does not persist the same enquiry records as the non-streaming implementation.
+
+This must be eliminated.
+
+Both pathways must share:
+
+- Intent processing.
+- Enquiry extraction.
+- Enquiry validation.
+- Conversation persistence.
+- Lead persistence.
+- Enquiry persistence.
+- Handoff processing.
+- Notification processing.
+- Error handling.
+
+Streaming should change how the response is delivered, not what business operations are executed.
+
+Important:
+
+- Never set `db_confirmed = true` before awaited persistence succeeds.
+- Never let the frontend interpret an incomplete stream as a successful database operation.
+- Provide a reliable final completion event containing the actual persistence outcome.
+- Handle client disconnects without silently losing a committed enquiry.
+- Prevent duplicate registrations when a client reconnects or retries.
+- Keep partial streamed text separate from verified final metadata.
+
+The frontend must display the true server-confirmed outcome.
+
+# 6. REPAIR ENQUIRY DASHBOARD AND DATA MAPPING
+
+Address ENQ-002, ENQ-005 and ENQ-006.
+
+The dashboard must display the exact canonical enquiry record.
+
+Fix the backend-to-frontend mapping.
+
+Verify that:
+
+- customer_name is displayed as the customer name.
+- customer_email is available for follow-up.
+- customer_phone is available for follow-up.
+- company_name is displayed correctly.
+- product_or_service is correct.
+- requirement is correct.
+- quantity is correct.
+- budget is correct.
+- timeline is correct.
+- location is correct.
+- original_message is preserved.
+- conversation_id opens the correct conversation.
+- enquiry status is accurate.
+- creation timestamps remain unchanged.
+
+Repair:
+
+- Enquiry list.
+- Enquiry details.
+- Search.
+- Filtering.
+- Sorting.
+- Status changes.
+- Editing.
+- Saving.
+- Refresh persistence.
+- Empty states.
+- Error states.
+- Mobile presentation.
+
+A failed save must be visible to the admin.
+
+Never swallow a database error and present the operation as successful.
+
+Remove or reconcile duplicated and divergent lead/enquiry representations.
+
+Establish one canonical source of truth and explicit derived views where required.
+
+# 7. PRIORITY TWO — REBUILD HUMAN HANDOFF RELIABILITY
+
+Address HANDOFF-001 through HANDOFF-006.
+
+The current implementation uses an in-memory handoff manager alongside separate Firestore records.
+
+Create a durable handoff workflow.
+
+## 7.1 Persistent handoff records
+
+Every handoff must be stored durably in Firestore.
+
+The persistent record must include:
+
+- handoff_id
+- tenant_id
+- conversation_id
+- enquiry_id, if available
+- visitor_id
+- reason
+- requested_by
+- customer_contact
+- priority
+- assigned_to
+- notification_status
+- workflow_status
+- created_at
+- updated_at
+- reviewed_at
+- resolved_at
+- notification_attempts
+- last_error, safely sanitized
+
+Suggested workflow states:
+
+`requested → pending → assigned → under_review → responded → resolved`
+
+Additional states may include:
+
+`cancelled`, `failed`, `waiting_for_customer`.
+
+Keep notification delivery status separate:
+
+`not_queued → queued → sending → sent → failed`
+
+An email being sent does not mean the handoff is resolved.
+
+An email being delivered does not mean a human has reviewed the conversation.
+
+## 7.2 Unified handoff triggers
+
+Support handoff when:
+
+- Visitor explicitly asks for a human.
+- Visitor requests a phone call.
+- Visitor requests email follow-up.
+- Alpha cannot answer a business-specific question confidently.
+- A complex issue requires human intervention.
+- A qualified visitor requests a quotation.
+- A business-defined rule requires escalation.
+
+Do not trigger handoff simply because the word "human" appears in an unrelated sentence.
+
+Replace brittle substring-based intent side effects with coherent intent processing.
+
+## 7.3 Durable notifications
+
+Implement a persistent notification/outbox mechanism.
+
+Requirements:
+
+1. Create the handoff record first.
+2. Queue the notification durably.
+3. Process notification delivery.
+4. Record each attempt.
+5. Store successful provider results.
+6. Retry temporary failures safely.
+7. Prevent duplicate notifications.
+8. Expose notification status in the dashboard.
+9. Alert the business owner when notification delivery fails.
+10. Preserve handoff records even when email providers are unavailable.
+
+Use the existing configured email provider integration.
+
+Do not introduce another provider unless absolutely necessary.
+
+Do not claim notification success before the provider confirms acceptance.
+
+Do not send real emails during automated tests.
+
+Use mocked providers or a safe test environment.
+
+## 7.4 Human review and approval
+
+The dashboard must allow the business owner to:
+
+- View the complete conversation.
+- View associated enquiry information.
+- Review why Alpha escalated the conversation.
+- Assign the handoff.
+- Mark it as under review.
+- Draft a response.
+- Edit the response.
+- Approve and send.
+- Retry a failed send safely.
+- Mark the issue resolved.
+- Reopen when appropriate.
+
+Ensure that the response is associated with the correct tenant, visitor and conversation.
+
+Preserve the existing approval-before-send behaviour.
+
+## 7.5 Remove the unreliable in-memory source of truth
+
+The in-memory handoff manager must no longer be the authoritative source for dashboard handoffs.
+
+Firestore must be the persistent source of truth.
+
+An in-memory cache may remain for performance, but must be disposable and recoverable.
+
+The handoff dashboard must work after:
+
+- Server restart.
+- Multiple server instances.
+- Temporary Firestore interruption.
+- Temporary email provider failure.
+
+# 8. PRIORITY THREE — FIX EMAIL REPLY AND API ROUTING
+
+Address ARCH-002 and SEC-004.
+
+The audit found duplicate `/api/inquiries/send-reply` registrations.
+
+Remove the duplicate registration and maintain one authoritative implementation.
+
+Requirements:
+
+- Validate authentication.
+- Verify tenant ownership.
+- Validate enquiry ownership.
+- Verify recipient identity.
+- Prevent arbitrary recipient substitution.
+- Validate message content.
+- Enforce approval before sending.
+- Implement durable idempotency.
+- Avoid duplicate email sends during concurrent requests.
+- Record send attempts and results.
+- Update the enquiry and handoff state consistently.
+- Surface failures honestly.
+- Preserve audit logs.
+
+Use the verified contact information stored in the enquiry unless a properly authorized and audited change is made.
+
+Do not mark an email as sent when the provider rejects it.
+
+Do not mark a human response as reviewed merely because an email API succeeded.
+
+# 9. PRIORITY FOUR — COMPANY BRAIN SECURITY AND GROUNDING
+
+Address BRAIN-001 through BRAIN-004 and SEC-002.
+
+The Company Brain must remain tenant-specific and serve as Alpha's authoritative source for business claims.
+
+## 9.1 Public/private separation
+
+The public `/api/widget/config` endpoint must never return the full Company Brain.
+
+Create a restricted public configuration DTO.
+
+Only expose fields genuinely required by the public widget.
+
+Keep internal information server-side, including:
+
+- Private sales notes.
+- Internal commercial strategies.
+- Internal operational instructions.
+- Sensitive customer information.
+- Private pricing guidance.
+- Internal-only business data.
+- Credentials or integration configuration.
+
+Retrieve private information through authorized server-side logic.
+
+## 9.2 Tenant isolation
+
+Verify every request against the correct widget and tenant.
+
+Ensure:
+
+- Tenant A cannot retrieve Tenant B's Company Brain.
+- Tenant A cannot access Tenant B's conversations.
+- Tenant A cannot read Tenant B's enquiries.
+- Tenant A cannot modify Tenant B's handoffs.
+- Identical conversation IDs across different tenants cannot cause cross-tenant leakage.
+- All caches include appropriate tenant and version identifiers.
+
+## 9.3 Brain freshness
+
+Repair best-effort synchronization and cache invalidation.
+
+When a business updates Company Brain:
+
+- Validate the update.
+- Persist it.
+- Update the version.
+- Invalidate or refresh relevant caches.
+- Make the new version available to subsequent conversations.
+- Report synchronization failures.
+
+Avoid inconsistent Company Brain versions across server instances.
+
+## 9.4 Truthful grounding
+
+Remove unconditional `grounded_in_brain: true` metadata.
+
+Grounding status must be based on actual retrieval and verified response context.
+
+Remove generic defaults that resemble real business facts.
+
+If a business has not specified:
+
+- Pricing.
+- Shipping.
+- Returns.
+- Delivery timelines.
+- Product specifications.
+- Discounts.
+- Guarantees.
+- Integrations.
+- Customer testimonials.
+
+Alpha must say the information is unavailable or ask an appropriate question.
+
+It must never invent these details.
+
+# 10. PRIORITY FIVE — REPAIR SECURITY AND ABUSE PROTECTION
+
+Address SEC-001 through SEC-006.
+
+## Required repairs
+
+### A. Public conversation state
+
+Remove anonymous unrestricted reads of visitor conversation-state documents.
+
+Do not solve this by exposing more Firestore permissions.
+
+Use secure server-mediated access, appropriately scoped capabilities or another secure architecture.
+
+### B. Public API rate limits
+
+Implement appropriate rate limiting and abuse controls for:
+
+- `/api/widget/chat`
+- `/api/analyze-inquiry`
+- Public configuration requests where appropriate.
+- Other public Gemini-backed endpoints.
+
+Use IP, tenant, widget and session-aware limits where appropriate.
+
+Include:
+
+- Request limits.
+- Message size limits.
+- Token/output limits.
+- Abuse detection.
+- Safe error responses.
+- Cost protection.
+
+Do not trust arbitrary client-supplied tenant IDs as the basis for quotas.
+
+### C. Email abuse protection
+
+Ensure authenticated users cannot use the send-reply endpoint to send arbitrary emails through a tenant's configured provider.
+
+### D. Security regression tests
+
+Test:
+
+- Prompt injection.
+- Cross-tenant access.
+- Unauthorized writes.
+- Unauthorized reads.
+- Forged widget IDs.
+- Session manipulation.
+- XSS payloads.
+- Malformed JSON.
+- Oversized messages.
+- Email recipient manipulation.
+- Approval bypass.
+- Public endpoint abuse.
+
+### E. Secrets
+
+Inspect all environment variables and build configurations.
+
+Ensure:
+
+- Gemini credentials are server-only.
+- Email provider credentials are server-only.
+- Firebase service credentials are server-only.
+- No secrets appear in client bundles.
+- No secrets appear in logs.
+
+# 11. PRIORITY SIX — CONVERSATION INTELLIGENCE
+
+Address CONV-001 through CONV-003.
+
+Preserve Alpha's existing conversational identity and strategic sales capabilities.
+
+Do not reduce Alpha to a generic FAQ bot.
+
+Improve:
+
+- Intent recognition.
+- Context retention.
+- Conversation corrections.
+- Natural qualification.
+- Objection handling.
+- Product understanding.
+- Visitor-specific communication.
+- Concise responses.
+- Accurate uncertainty handling.
+- Appropriate human escalation.
+
+Remove duplicate and conflicting intent logic.
+
+The decision engine, orchestration layer and response generator must not independently trigger conflicting business operations.
+
+Create a coherent intent and action pipeline.
+
+Test negative examples.
+
+For example:
+
+- "I don't want to speak to a human" must not trigger a handoff.
+- "The price is interesting, but I'm not buying" must not automatically create a qualified enquiry.
+- "I want to know more" must not fabricate contact details.
+- "Can you send a quotation?" must identify quote intent.
+- "Actually, I need two websites instead of one" must update the correct field without corrupting other fields.
+
+Use persistent conversation context where appropriate, rather than relying exclusively on process-local memory.
+
+Do not claim that a message has been remembered permanently when it exists only in temporary process memory.
+
+# 12. PRIORITY SEVEN — PERFORMANCE, STREAMING AND RELIABILITY
+
+Address PERF-001 through PERF-005.
+
+Repair:
+
+- Request timeout handling.
+- Cancellation and AbortController behaviour.
+- Streaming termination.
+- Client disconnect handling.
+- Gemini timeout handling.
+- Retry behaviour.
+- Model fallback behaviour.
+- Firestore write failures.
+- Concurrent requests.
+- Duplicate submissions.
+- Long conversation histories.
+- Large Company Brain profiles.
+- Network interruptions.
+- Server restarts.
+
+The current timeout implementation must be reviewed.
+
+A 25-second timeout must not leave an already-started SSE response hanging indefinitely.
+
+Requirements:
+
+- Clear timers when requests complete.
+- Abort underlying work where supported.
+- End or close streams correctly.
+- Distinguish partial responses from completed responses.
+- Prevent duplicate side effects on retry.
+- Preserve already committed records.
+- Avoid unbounded retries.
+- Use durable idempotency for important business operations.
+
+Instrument performance.
+
+Record appropriate metrics:
+
+- Model generation time.
+- First-token latency.
+- Total response time.
+- Firestore write time.
+- Enquiry processing time.
+- Handoff creation time.
+- Notification processing time.
+- Error rates.
+
+Do not log customer secrets or unnecessary private content.
+
+# 13. PRIORITY EIGHT — EXTERNAL WIDGET RELIABILITY
+
+Address WIDGET-001 and WIDGET-002.
+
+Preserve the existing embeddable widget installation mechanism and design.
+
+Investigate all existing widget implementations:
+
+- `public/widget.js`
+- `public/chat-widget.js`
+- `CustomerChatWidget`
+- `StandaloneEmbedChat`
+
+Avoid divergent behaviour.
+
+Create one consistent contract for:
+
+- Widget initialization.
+- Tenant identification.
+- Configuration.
+- Conversation creation.
+- Streaming.
+- Message history.
+- Enquiry registration.
+- Handoff.
+- Error states.
+- Persistence confirmation.
+
+Fix the multiple-widget issue where one global loaded flag/fixed root can prevent additional widget instances from loading.
+
+Support multiple instances where appropriate or explicitly validate and document a single-instance restriction.
+
+Test on an isolated external HTML page.
+
+Verify:
+
+- Cross-origin requests.
+- CSS isolation.
+- Host-page JavaScript conflicts.
+- Multiple widget instances.
+- Mobile layout.
+- Open/close behaviour.
+- Network errors.
+- Conversation refresh.
+- Session isolation.
+- Accessibility.
+- Widget loading performance.
+
+Never display a successful enquiry confirmation when the request failed.
+
+# 14. EXPERIENCE MODE — PRESERVE AND PROTECT
+
+Experience Mode is a working demonstration environment and must not regress.
+
+Before making changes:
+
+1. Identify its exact routes and dependencies.
+2. Record existing behaviour.
+3. Identify shared services.
+4. Identify production-only dependencies.
+5. Identify any code changes that could affect Experience Mode.
+
+Preserve:
+
+- Public access.
+- Business onboarding.
+- Temporary guest Company Brain.
+- Guest Company Brain review.
+- Customer-roleplay experience.
+- Gemini integration.
+- Session isolation.
+- Restart and end-session behaviour.
+- Mobile functionality.
+- Existing experience design.
+
+Experience Mode and production should share reusable, tested business logic where appropriate, especially grounding and extraction validation.
+
+However, do not force them to share tenant authentication, guest persistence or security assumptions.
+
+Do not merge guest sessions with real business tenant data.
+
+Do not allow changes to production persistence to accidentally break guest sessions.
+
+After all implementation work, run Experience Mode regression tests.
+
+# 15. AUTOMATED TESTING — MANDATORY
+
+Do not stop after modifying the source.
+
+Create or repair the test infrastructure.
+
+Inspect existing package scripts and test files.
+
+Implement a proper test runner and add the necessary scripts without unnecessarily replacing existing dependencies.
+
+Use:
+
+- Unit tests.
+- Integration tests.
+- Firebase emulator tests.
+- API contract tests.
+- Browser end-to-end tests where practical.
+- Security tests.
+- Regression tests.
+- Mocked Gemini tests.
+- Mocked email-provider tests.
+
+Do not use real customer data.
+
+Do not send real customer emails during tests.
+
+## 15.1 Enquiry test suite
+
+Create at least 30 test scenarios.
+
+Include:
+
+1. Simple purchase intent.
+2. Quote request.
+3. Pricing question.
+4. Human contact request.
+5. Name extraction.
+6. Email extraction.
+7. Phone extraction.
+8. Company extraction.
+9. Product/service extraction.
+10. Quantity extraction.
+11. Budget extraction.
+12. Timeline extraction.
+13. Location extraction.
+14. Multiple fields in one message.
+15. Ambiguous quantities.
+16. Ambiguous timelines.
+17. Incomplete enquiries.
+18. Visitor correction.
+19. Multiple products.
+20. Duplicate registration.
+21. Concurrent registration.
+22. Streaming registration.
+23. Non-streaming registration.
+24. Failed Firestore write.
+25. Network interruption.
+26. Dashboard round-trip.
+27. Dashboard refresh.
+28. Incorrect contact details.
+29. Spam.
+30. Ordinary conversation that must not create an enquiry.
+
+Every test must verify the actual stored result, not merely the extraction function's output.
+
+## 15.2 Human handoff test suite
+
+Test:
+
+- Explicit human request.
+- Phone call request.
+- Email follow-up request.
+- Unknown business information.
+- Complex issue.
+- Qualified quote request.
+- Streaming handoff.
+- Non-streaming handoff.
+- Durable handoff persistence.
+- Dashboard retrieval.
+- Server restart recovery.
+- Notification queue.
+- Notification success.
+- Notification failure.
+- Retry.
+- Duplicate prevention.
+- Human assignment.
+- Human review.
+- Draft response.
+- Approval.
+- Successful email sending.
+- Failed email sending.
+- Resolution.
+- Reopening.
+- Cross-tenant authorization.
+
+## 15.3 Company Brain test suite
+
+Test:
+
+- Missing prices.
+- Approximate prices.
+- Conflicting prices.
+- Missing policies.
+- Unsupported claims.
+- Updated business information.
+- Stale cache.
+- Multiple tenants.
+- Cross-tenant conversation IDs.
+- Internal-only notes.
+- Prompt injection.
+- Malicious Company Brain content.
+- Empty Company Brain.
+- Large Company Brain.
+- Unavailable products.
+
+## 15.4 Build and quality checks
+
+Run:
+
+- TypeScript compilation.
+- Production build.
+- Lint.
+- Existing tests.
+- New tests.
+- Firestore emulator tests.
+- Browser end-to-end tests where available.
+
+Fix failures caused by your implementation.
+
+Do not disable failing tests to make the suite appear successful.
+
+# 16. DATABASE MIGRATIONS AND BACKWARD COMPATIBILITY
+
+Before changing existing Firestore structures:
+
+- Inspect all existing collections and document shapes.
+- Identify old and new schemas.
+- Preserve existing customer records.
+- Create safe migration logic if required.
+- Make migrations idempotent.
+- Do not delete production records.
+- Support old records during the transition.
+- Add validation for newly written documents.
+- Document any manual migration or configuration steps.
+
+Avoid breaking existing dashboard users and existing widget installations.
+
+# 17. FINAL ACCEPTANCE CRITERIA
+
+Alpha must not be considered production-ready until the following are verified.
+
+| Requirement | Acceptance condition |
+|---|---|
+| Firebase persistence | Server writes and authorization pass emulator tests |
+| Enquiry extraction | Structured fields correctly mapped and validated |
+| Enquiry persistence | Streaming and non-streaming create consistent records |
+| Enquiry dashboard | Records display accurately and survive refresh |
+| Idempotency | Retries do not create duplicate business records |
+| Contact information | Correctly saved, retrieved and displayed |
+| Conversation history | Server-authoritative and protected against stale overwrites |
+| Human handoff | Durable across restarts and server instances |
+| Notifications | Queued, attempted, tracked and safely retried |
+| Human review | Business owner can review and manage handoffs |
+| Email follow-up | Approval and sending status accurately represented |
+| Company Brain | Tenant-specific, private and grounded |
+| Security | Cross-tenant and unauthorized access tests pass |
+| Rate limiting | Public model endpoints have abuse protection |
+| Streaming | Correct completion and persistence semantics |
+| External widget | Installation and interaction tests pass |
+| Experience Mode | Existing functionality remains intact |
+| Production build | Successful |
+| TypeScript | No new errors |
+| Regression suite | All critical tests pass |
+
+If an acceptance criterion cannot be met because external credentials or infrastructure are unavailable, clearly identify the blocker. Do not simulate a successful result.
+
+# 18. IMPLEMENTATION ORDER
+
+Work in this sequence:
+
+PHASE 1 — Repository inspection and baseline.
+PHASE 2 — Firebase server authorization and persistence.
+PHASE 3 — Canonical enquiry schema and shared persistence.
+PHASE 4 — Streaming/non-streaming parity.
+PHASE 5 — Dashboard data integrity.
+PHASE 6 — Durable human handoff.
+PHASE 7 — Notification outbox and email approval.
+PHASE 8 — Company Brain privacy and grounding.
+PHASE 9 — API security and rate limiting.
+PHASE 10 — Conversation intelligence and memory reliability.
+PHASE 11 — Widget reliability and performance.
+PHASE 12 — Experience Mode regression protection.
+PHASE 13 — Full test execution and production build.
+
+Complete the work systematically. Resolve architectural dependencies before dependent features.
+
+# 19. FINAL DELIVERY REPORT
+
+When finished, provide:
+
+1. Executive summary.
+2. Root causes identified and repaired.
+3. Files modified.
+4. Architecture changes.
+5. Database changes and migrations.
+6. Security improvements.
+7. Enquiry workflow results.
+8. Human handoff workflow results.
+9. Company Brain improvements.
+10. Widget improvements.
+11. Experience Mode regression results.
+12. Build and TypeScript results.
+13. Unit, integration and E2E test results.
+14. Remaining defects.
+15. Required environment variables or deployment configuration.
+16. Exact deployment instructions.
+17. Anything that still requires manual verification.
+
+For every major repair, identify the test that proves it works.
+
+Separate:
+- Implemented.
+- Locally tested.
+- Emulator tested.
+- Mocked.
+- Live verified.
+- Blocked.
+
+Never report a blocked test as passed.
+
+# FINAL DIRECTIVE
+
+Do not merely make Alpha appear functional.
+
+Make the underlying business operations reliable.
+
+A business owner must be able to trust that:
+
+- A visitor's enquiry is correctly captured.
+- The enquiry is actually saved.
+- The correct customer details appear in the dashboard.
+- No enquiry silently disappears.
+- A human handoff reaches a durable queue.
+- The correct business is notified.
+- An approved response is actually sent.
+- Customer and business data remain private.
+- Experience Mode continues working.
+
+**One conversation should produce one consistent, traceable business record and, when appropriate, one reliable human follow-up workflow.**
+
+Preserve the working product. Repair the architecture. Test the entire lifecycle. Do not declare victory prematurely.
+
+Begin by inspecting the current repository and implementing the repairs.

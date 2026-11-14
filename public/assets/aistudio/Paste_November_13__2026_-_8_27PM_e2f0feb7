@@ -1,0 +1,1247 @@
+AI WORKFORCE — FULL-SCALE PRODUCTION HARDENING, SECURITY REPAIR & SYSTEM INTEGRITY MANDATE
+
+MISSION: Transform the existing AI Workforce codebase into a secure, reliable, industry-neutral, multi-tenant AI Employee platform that is ready for real businesses.
+
+MODE: FULL REPOSITORY INVESTIGATION + CONTROLLED IMPLEMENTATION + VERIFICATION.
+
+PRIORITY: Correctness > Security > Data Integrity > Reliability > Functionality > Performance > UI Polish.
+
+AUTHORITY: You are acting as the Principal Software Architect, Application Security Engineer, Senior Backend Engineer, Firebase Architect, QA Lead and Production Reliability Engineer.
+
+This is an engineering assignment, not a brainstorming exercise.
+
+---
+
+1. THE NON-NEGOTIABLE MISSION
+
+Inspect the ENTIRE repository before modifying anything.
+
+The codebase contains approximately 72,000 lines. Do not assume that every file is active, every feature works, or every previous repair was implemented correctly.
+
+Your responsibility is to:
+
+1. Understand the complete existing architecture.
+2. Trace actual execution paths.
+3. Identify every confirmed bug, vulnerability, architectural weakness and misleading success state.
+4. Repair all verified issues in scope.
+5. Preserve working functionality.
+6. Test the repaired system.
+7. Produce an evidence-based final engineering report.
+
+Do not merely fix the findings listed below. They are the minimum known issue inventory. Discover additional issues throughout the repository.
+
+Do not stop after fixing the first few vulnerabilities.
+
+Do not produce a beautiful report while leaving the actual code unchanged.
+
+Do not claim that a repair works without evidence.
+
+---
+
+2. ABSOLUTE ARCHITECTURAL RULES
+
+These rules apply to every change.
+
+A. Industry-neutral architecture
+
+AI Workforce must work for businesses across industries.
+
+Examples include:
+
+- SaaS
+- Healthcare
+- Education
+- Fashion
+- Retail
+- Professional services
+- Real estate
+- Manufacturing
+- Hospitality
+- Financial services
+
+Never hardcode a specific tenant, industry, product, pricing model, business identity or business workflow into the generic Alpha engine.
+
+Specifically eliminate inappropriate global defaults or fallbacks involving:
+
+- AI Workforce
+- Magnus Verity
+- NOIRÉ
+- VANTÉ
+- Apex
+- TheRoots
+- Clothing businesses
+- Any other demonstration tenant
+
+These may exist as explicitly isolated test fixtures or official platform identity data.
+
+They must never become universal tenant defaults.
+
+B. Tenant isolation
+
+Every tenant-owned resource must have an explicit, verified tenant ownership boundary.
+
+This includes:
+
+- Company Brain
+- Widget configurations
+- Conversations
+- Visitors
+- Visitor sessions
+- Inquiries
+- Handoffs
+- Analytics
+- Notifications
+- Admin records
+- Files
+- Audit events
+- Knowledge bases
+- Integrations
+- Settings
+- Cache entries
+
+Never trust a client-provided tenant ID as proof of ownership.
+
+Resolve tenant identity from authenticated ownership or a verified server-side widget mapping.
+
+C. Preserve the existing product
+
+Do not:
+
+- Rewrite the entire application unnecessarily.
+- Replace working components with mock implementations.
+- Delete features to make tests pass.
+- Weaken security rules to bypass authorization failures.
+- Introduce unnecessary dependencies.
+- Introduce additional paid AI APIs.
+- Replace the active Gemini-based Alpha architecture.
+- Break existing routes, dashboards, widget integrations or onboarding.
+- Remove useful functionality without proving it is unsafe and documenting the change.
+
+Use targeted, backward-compatible migrations wherever possible.
+
+D. No fake success
+
+Never return:
+
+- "db_confirmed: true" without verified durable persistence.
+- "inquiry_registered: true" without successful registration.
+- "email_dispatched: true" when no email was sent.
+- Healthy service statuses without real health checks.
+- Successful handoff statuses without persisted handoff records.
+- Verified AI answers without actual grounding evidence.
+
+If an operation fails, report its actual failure state.
+
+---
+
+3. P0 — CRITICAL SECURITY REPAIRS
+
+These are release blockers.
+
+3.1 Firestore public Company Brain exposure
+
+Investigate and repair:
+
+- "firestore.rules:33–34"
+- "firestore.rules:113–116"
+- "StandaloneEmbedChat.tsx"
+- "server.ts:477–537"
+- "widgetHandler.ts:758–824"
+
+Known concern: public reads expose entire "public_widgets" and "users/{uid}/widget_config" documents.
+
+Some documents contain private Company Brain information, including:
+
+- "customInstructions"
+- "forbiddenBehaviors"
+- "commitmentsNeverToMake"
+- "badFitCriteria"
+- "humanEscalation.recipientEmail"
+- Internal operational configuration
+- Other tenant-private information
+
+Required repairs:
+
+1. Remove public access to complete private configuration documents.
+2. Create a deliberate public configuration projection.
+3. Return only fields necessary for widget rendering and approved public functionality.
+4. Keep Company Brain internal instructions server-side.
+5. Keep escalation recipient addresses private.
+6. Ensure the public widget can operate without downloading private Company Brain data.
+7. Remove accidental exposure through logs, error messages, debugging responses and serialized objects.
+8. Review every public API response for accidental tenant data leakage.
+
+Never solve this by making the entire widget configuration public again.
+
+3.2 Cross-tenant widget ownership takeover
+
+Investigate:
+
+- "firestore.rules:40–45"
+- "widgetHandler.ts:777–805"
+
+Known concern: update rules may permit changing an existing document's "user_id" to the authenticated attacker's UID.
+
+Required repairs:
+
+1. Preserve immutable ownership on existing documents.
+2. Verify both existing and proposed ownership.
+3. Prevent unauthorized owner reassignment.
+4. Restrict document creation to authorized ownership.
+5. Validate tenant-widget mappings server-side.
+6. Never resolve an existing widget owner from untrusted client-supplied ownership data.
+7. Prevent cache poisoning and ownership redirection.
+8. Add adversarial cross-tenant tests.
+
+A tenant must never be able to overwrite another tenant's widget or redirect its conversations.
+
+3.3 Global official widget configuration
+
+Investigate:
+
+- "workspaceService.ts:1247–1279"
+
+Known concern: customer-facing settings still write to "official-ai-workforce".
+
+Required repairs:
+
+1. Separate immutable platform configuration from customer configuration.
+2. Remove customer-facing writes to global official configuration.
+3. Make customer settings tenant-scoped.
+4. Define official platform identity through immutable platform configuration or an immutable platform tenant identifier.
+5. Prevent customer requests from changing platform identity.
+6. Verify all remaining references to the official widget document.
+
+3.4 Revoked administrator privileges
+
+Investigate:
+
+- "firestore.rules:14–24"
+- "adminAuth.ts:1090–1114"
+
+Required repairs:
+
+1. Require active administrator status.
+2. Enforce role and status in every protected authorization path.
+3. Ensure revoked users cannot retain access through existing Firestore documents.
+4. Apply revocation immediately to server authorization.
+5. Prevent revoked Super Admins from retaining privileges.
+6. Test revoked CEO, Super Admin and Admin accounts separately.
+7. Review role escalation and role modification paths.
+8. Ensure only authorized higher-level administrators can grant privileged roles.
+
+Never treat document existence as sufficient proof of administrator authorization.
+
+3.5 OAuth secrets and token security
+
+Investigate:
+
+- "src/server/marketingService.ts:632–740"
+- ".youtube_oauth.json"
+- ".gitignore"
+- OAuth routes in "server.ts"
+
+Known concerns:
+
+- A real-looking OAuth client secret is hardcoded in source.
+- Refresh/access tokens may be stored in plaintext.
+- OAuth state validation is missing or inadequate.
+- Static state creates CSRF/account-linking risks.
+
+Required repairs:
+
+1. Inspect whether the existing credential is genuine or a placeholder.
+2. Never reproduce credentials in logs or reports.
+3. If exposed and active, treat it as compromised and recommend immediate revocation and rotation.
+4. Move credentials to secure environment configuration or an approved secret manager.
+5. Never commit secrets or token files.
+6. Add ".youtube_oauth.json" and other sensitive runtime files to appropriate ignore rules.
+7. Store OAuth tokens securely with appropriate access restrictions.
+8. Validate OAuth state using cryptographically secure, single-use state.
+9. Bind OAuth initiation and callback to the authenticated administrator session.
+10. Validate redirect URI and callback behavior.
+11. Remove development-only callback fallbacks from production configuration.
+12. Verify the actual connected YouTube account/channel instead of returning hardcoded metadata.
+13. Review disconnect, token refresh, expiration and revocation behavior.
+
+Do not claim credentials have been rotated. Rotation requires authorized action in the provider console.
+
+3.6 Public media path traversal
+
+Investigate:
+
+- "server.ts:91–120"
+
+Required repairs:
+
+1. Restrict filenames to an explicit safe pattern.
+2. Reject path separators and traversal sequences.
+3. Resolve the final filesystem path.
+4. Verify that the resolved path remains inside the permitted media directory.
+5. Prevent access to environment files, token files, source code and arbitrary local files.
+6. Return safe error responses.
+7. Add traversal regression tests.
+
+Do not expose arbitrary filesystem paths through the public media endpoint.
+
+---
+
+4. P0 — FIREBASE BACKEND ARCHITECTURE
+
+Investigate the entire repository for server-side Firebase Web SDK usage.
+
+Known files include:
+
+- "src/firebase.ts"
+- "server.ts"
+- "adminAuth.ts"
+- "adminApiRouter.ts"
+- "analyticsService.ts"
+- "adminAuditService.ts"
+- "systemHealthService.ts"
+- "marketingService.ts"
+- "ceoIntelligenceHandler.ts"
+
+Known concern: privileged Express server operations use Firebase Web SDK objects such as "db" and "auth", without necessarily binding them to the verified request identity.
+
+Required repairs:
+
+1. Use Firebase Admin SDK for privileged server-side database operations.
+2. Initialize Admin SDK safely and only once.
+3. Support Cloud Run Application Default Credentials.
+4. Correct "hasAdminCredentials()" so ADC is recognized.
+5. Remove accidental dependence on a browser SDK authentication state inside backend handlers.
+6. Verify Firebase ID tokens on protected requests.
+7. Derive authenticated user identity from verified tokens.
+8. Authorize access to the requested tenant before every tenant-owned read/write.
+9. Apply explicit tenant filters and ownership checks.
+10. Ensure all privileged database operations are server-authorized.
+11. Do not weaken Firestore security rules to compensate for incorrect backend access.
+12. Review transactions, batches, server timestamps and query behavior.
+13. Handle database failures explicitly.
+14. Remove memory fallbacks from production-critical persistence paths unless they are explicitly identified as temporary and incapable of reporting durable success.
+
+Review these affected paths especially:
+
+- Admin role loading
+- Admin invitations
+- Admin revocation
+- Dashboard queries
+- Widget conversation synchronization
+- Conversation acknowledgements
+- Inquiry replies
+- Marketing settings
+- Audit logs
+- Analytics
+- System health
+- CEO intelligence
+
+Every operation must have a clear authentication, authorization and persistence boundary.
+
+---
+
+5. P0 — VISITOR AUTHENTICATION AND CHAT INTEGRITY
+
+Investigate:
+
+- "CustomerChatWidget.tsx:1028–1075"
+- "server.ts:832–870"
+- "chatHandler.ts:282–322"
+- "chatHandler.ts:409–435"
+- "server.ts:365–477"
+
+Known concerns:
+
+- Chat requests do not appear to send a visitor session token.
+- Client-supplied message history is trusted.
+- Sender roles can be forged.
+- Conversation and visitor IDs are client-controlled.
+- Some session retrieval failures may still lead to token issuance.
+
+Required repairs:
+
+1. Design a server-verifiable visitor session.
+2. Issue short-lived, signed or otherwise securely verifiable visitor tokens.
+3. Bind tokens to tenant, widget and conversation/visitor identity as appropriate.
+4. Validate tokens on every protected chat operation.
+5. Reject expired, malformed, revoked or mismatched tokens.
+6. Do not trust client-provided Alpha messages.
+7. Store authoritative conversation history server-side.
+8. Treat client history only as untrusted display context, if retained at all.
+9. Validate sender roles on the server.
+10. Do not permit visitors to submit privileged system or assistant messages.
+11. Enforce conversation ownership.
+12. Prevent arbitrary conversation ID substitution.
+13. Prevent arbitrary visitor ID impersonation.
+14. Do not issue visitor tokens if required conversation validation fails.
+15. Add replay, expiration and cross-tenant token tests.
+16. Preserve legitimate anonymous visitor functionality without granting anonymous administrative access.
+
+---
+
+6. P1 — SIMULATION AND PREVIEW SECURITY
+
+Investigate:
+
+- "widgetHandler.ts:855"
+- "widgetHandler.ts:963–995"
+- "alphaBrainRetriever.ts:86–92"
+
+Known concerns:
+
+- Client controls simulation mode.
+- Client can submit an alternative Company Brain.
+- Simulation may bypass human-owned conversation protections and idempotency checks.
+- "_isOfficialAiWorkforce" may be trusted from a client-supplied profile.
+
+Required repairs:
+
+1. Never trust "environment === 'simulation'" as authorization.
+2. Never trust "is_simulated === true" as authorization.
+3. Never trust client-supplied Company Brain as a production tenant identity.
+4. Use server-issued, scoped preview authorization.
+5. Bind preview authorization to the correct tenant and preview session.
+6. Separate simulation records from production records.
+7. Prevent simulation from altering real visitor sessions, inquiries, handoffs or analytics.
+8. Prevent simulation from bypassing human ownership protections.
+9. Do not trust "_isOfficialAiWorkforce" when it comes from client input.
+10. Verify platform identity through immutable server-side configuration.
+11. Test attempts to enter simulation mode against another tenant.
+
+The preview experience must continue working legitimately. Secure it rather than removing it.
+
+---
+
+7. P0 — TENANT-SCOPED CACHING AND IDEMPOTENCY
+
+Investigate:
+
+- "widgetHandler.ts:83–87"
+- "widgetHandler.ts:866–890"
+- "widgetHandler.ts:1134–1174"
+- "conversationMemoryStore"
+- "canonicalEnquiryService"
+- "durableHandoffService"
+- "CustomerChatWidget.tsx"
+
+Known concerns:
+
+- Idempotency cache keyed only by "client_message_id".
+- Conversation memory keyed only by conversation ID.
+- Inquiry and handoff memory maps may use identifiers derived from conversation IDs.
+- Message IDs generated with "Date.now()".
+
+Required repairs:
+
+1. Scope every cache key to tenant identity.
+2. Include conversation identity where relevant.
+3. Use cryptographically strong unique identifiers where appropriate.
+4. Make idempotency durable when required for production correctness.
+5. Prevent two tenants from sharing cached responses.
+6. Prevent cross-tenant conversation-memory collisions.
+7. Prevent cross-tenant inquiry and handoff collisions.
+8. Bound cache memory usage.
+9. Add expiration and cleanup policies.
+10. Ensure multiple server instances do not depend on process-local memory for correctness.
+11. Handle simultaneous duplicate requests safely.
+12. Add tests for identical IDs across tenants and concurrent requests.
+
+---
+
+8. P0 — INQUIRY PERSISTENCE AND HONEST STATUS
+
+Investigate:
+
+- "widgetHandler.ts:1193–1209"
+- "canonicalEnquiryService.ts:341–365"
+- "chatHandler.ts:477–540"
+- "PortfolioInquiryModal.tsx:47–69"
+- "server.ts:620–730"
+
+Known concerns:
+
+- Persistence results are ignored.
+- Memory fallback may report "db_confirmed: true".
+- Explicit inquiry registration can return synthetic success.
+- Portfolio inquiry may create an orphaned conversation.
+- Send-reply may swallow write failures.
+- "email_dispatched: true" may be returned when no email was sent.
+
+Required repairs:
+
+1. Establish one authoritative inquiry persistence service.
+2. Ensure every successful inquiry has a durable database record.
+3. Verify the tenant owner of each inquiry.
+4. Ensure inquiries survive process restarts.
+5. Ensure duplicate submissions do not create duplicate records.
+6. Make inquiry creation idempotent.
+7. Validate submitted fields.
+8. Preserve the original visitor's message and relevant context.
+9. Correct the explicit inquiry-registration branch.
+10. Ensure the portfolio form uses a valid intended submission workflow.
+11. Remove synthetic success responses.
+12. Remove misleading database confirmation flags.
+13. Only report email dispatch when the actual email provider confirms dispatch.
+14. Distinguish saved, queued, sent and failed states.
+15. Ensure failed writes are visible and recoverable.
+16. Verify inquiries appear in the correct tenant dashboard.
+
+---
+
+9. P0 — HUMAN HANDOFF AND NOTIFICATION RELIABILITY
+
+Investigate:
+
+- "widgetHandler.ts:1212–1220"
+- "adminApiRouter.ts:1430–1465"
+- "alphaOrchestrationEngine.ts:95–105"
+- "alphaOrchestrationEngine.ts:138–151"
+- "notificationWorker.ts"
+
+Known concerns:
+
+- Handoff creation does not supply "notify_email".
+- Admin handoff listing uses in-memory records rather than durable records.
+- Simple substring matching creates false handoffs.
+- Notifications lack robust retries and concurrency protection.
+
+Required repairs:
+
+1. Use durable handoff records.
+2. Store tenant ID, conversation ID, reason, status, timestamps and relevant context.
+3. Queue notifications through a durable outbox.
+4. Resolve recipient information from the authorized tenant's private configuration.
+5. Never expose recipient email addresses to public clients.
+6. Implement notification retries with backoff.
+7. Use transactional claiming or leases to prevent duplicate worker execution.
+8. Track queued, processing, delivered and failed states.
+9. Make retry behavior observable.
+10. Ensure handoff records survive server restarts.
+11. Make admin handoff listings read from the authoritative durable store.
+12. Ensure human-owned conversations cannot be silently overridden by Alpha.
+13. Correct false-positive detection involving negation.
+14. Detect genuine requests for human support using contextual intent.
+15. Preserve explicit customer requests for a human.
+16. Add tests for negative statements, ambiguous requests, explicit escalation and duplicate notifications.
+
+---
+
+10. P1 — SSRF AND WEBSITE EXTRACTION SECURITY
+
+Investigate:
+
+- "websiteExtractor.ts:38–145"
+- "/api/onboarding/extract-website"
+
+Known concerns:
+
+- Incomplete private IP blocking.
+- Inadequate IPv6 handling.
+- Redirects may not be revalidated.
+- DNS rebinding risk.
+- Response body may be fully buffered.
+- Timeout may end before body processing.
+- Public endpoint may be abused.
+- Extracted content may contain prompt injection.
+
+Required repairs:
+
+1. Accept only supported HTTP/HTTPS schemes.
+2. Reject loopback, private, link-local, multicast, reserved and internal network destinations.
+3. Handle IPv4 and IPv6 correctly.
+4. Normalize and validate hostnames.
+5. Prevent DNS rebinding using a safe resolution and connection strategy.
+6. Validate every redirect destination.
+7. Restrict redirect count.
+8. Enforce connection, header and body timeouts.
+9. Stream responses with a strict maximum byte limit.
+10. Reject unsupported content types.
+11. Prevent internal service and metadata endpoint access.
+12. Apply request rate limits and abuse protection.
+13. Treat extracted content as untrusted data.
+14. Prevent extracted text from overriding system instructions, tenant policy or Company Brain rules.
+15. Add safe tests for private IPs, redirects, malformed URLs, oversized responses and malicious page content.
+
+Do not test against real third-party internal infrastructure. Use controlled local fixtures.
+
+---
+
+11. P1 — PUBLIC API ABUSE AND RATE LIMITING
+
+Investigate:
+
+- "/api/test-suite/run"
+- "/api/analyze-inquiry"
+- "/api/onboarding/extract-website"
+- "/api/widget/chat"
+- "checkRateLimit"
+- "server.ts"
+
+Known concerns:
+
+- Expensive endpoints may lack authentication or rate limits.
+- Unknown widget IDs may receive default configurations.
+- Attackers may rotate widget IDs.
+- "x-forwarded-for" may be trusted unsafely.
+- In-memory rate-limit maps are unbounded.
+
+Required repairs:
+
+1. Classify every route as public, authenticated or privileged.
+2. Document its authorization requirements.
+3. Protect expensive endpoints with authentication or narrowly scoped public access.
+4. Add per-tenant and per-IP rate limits.
+5. Apply stricter limits to expensive Gemini operations.
+6. Establish a trusted proxy configuration.
+7. Never blindly trust arbitrary forwarded IP headers.
+8. Prevent unknown widget IDs from silently becoming valid tenants.
+9. Remove generic default-tenant fallback behavior.
+10. Ensure public requests resolve to registered widget configurations.
+11. Bound rate-limit storage.
+12. Add expiration and cleanup.
+13. Add request size limits.
+14. Add appropriate timeouts and concurrency controls.
+15. Return consistent safe errors.
+16. Verify abuse controls do not block legitimate visitors.
+
+---
+
+12. P1 — ALPHA COMPANY BRAIN AND TENANT ACCURACY
+
+Inspect the active Alpha execution path, not merely unused modules.
+
+Investigate:
+
+- "alphaDecisionEngine.ts:1342–1354"
+- "alphaDecisionEngine.ts:1524–1533"
+- "alphaResponseGenerator.ts:563–655"
+- "alphaResponseGenerator.ts:724–735"
+- "alphaResponseGenerator.ts:1142–1148"
+- "alphaResponseGenerator.ts:1350–1359"
+- "alphaBrainRetriever.ts:86–92"
+- "widgetHandler.ts:636–744"
+
+Known concerns:
+
+- AI Workforce pricing appears in generic pricing decisions.
+- Fallback responses contain AI Workforce and Magnus identity.
+- Other tenant-specific branches include Apex and TheRoots.
+- Unsupported fallback responses may be marked verified.
+- Some sanitization removes legitimate sentences ending in words such as "with" or "for".
+- Official identity may still be trusted through a client-injected flag.
+
+Required repairs:
+
+1. Establish Company Brain as the authoritative source of tenant-specific commercial facts.
+2. Resolve tenant identity server-side.
+3. Remove generic hardcoded pricing and business identity.
+4. Remove tenant-specific fallback contamination.
+5. Keep official AI Workforce platform information isolated from customer tenant information.
+6. Distinguish verified facts, reasonable interpretation and missing information.
+7. Never fabricate pricing, product features, guarantees, availability, policies or commitments.
+8. Never claim a response is Company Brain-verified without supporting evidence.
+9. Use honest uncertainty when information is missing.
+10. Respect forbidden behaviors and commitments-never-to-make.
+11. Respect bad-fit criteria.
+12. Respect human escalation requirements.
+13. Ensure Alpha cannot override tenant policy through visitor messages or scraped website text.
+14. Review response sanitization for valid-language preservation.
+15. Ensure fallback responses follow the same tenant isolation and grounding rules.
+16. Test multiple synthetic businesses across completely different industries.
+17. Verify that changing one tenant's Company Brain does not affect another tenant.
+
+Maintain the existing active Gemini-based model architecture.
+
+Do not introduce additional paid AI APIs.
+
+Do not activate dormant multi-provider routing merely because related adapters exist.
+
+---
+
+13. P1 — ANALYTICS, CONSENT AND PRIVACY
+
+Investigate:
+
+- "server.ts:477–520"
+- "StandaloneEmbedChat.tsx"
+- "CustomerChatWidget.tsx"
+- "analyticsService.ts"
+
+Known concerns:
+
+- Analytics consent may default to true.
+- Standalone widget may omit consent information.
+- Global "aiw_anon_visitor_id" can correlate visitors across different customer websites.
+- Analytics keys may lack tenant/widget boundaries.
+- Raw IP may be retained.
+- Firestore rules may prohibit durable analytics writes.
+
+Required repairs:
+
+1. Establish an explicit analytics consent policy.
+2. Do not silently interpret missing consent as affirmative consent.
+3. Separate essential operational processing from optional analytics.
+4. Scope visitor identifiers appropriately.
+5. Prevent unnecessary cross-tenant correlation.
+6. Scope analytics sessions to tenant and widget.
+7. Minimize collection of personally identifiable information.
+8. Avoid retaining raw IP unnecessarily.
+9. Apply documented retention limits.
+10. Ensure consent choices are respected by all widget implementations.
+11. Persist authorized analytics through the correct backend.
+12. Report analytics as unavailable when persistence fails.
+13. Test consent granted, denied and missing.
+
+---
+
+14. P1 — ADMIN, AUDIT LOGS AND SYSTEM HEALTH
+
+Investigate:
+
+- "adminAuditService.ts"
+- "analyticsService.ts"
+- "systemHealthService.ts"
+- "adminApiRouter.ts"
+- "ceoIntelligenceHandler.ts"
+- "server.ts"
+
+Known concerns:
+
+- Audit logs may only exist in memory.
+- Analytics persistence may fail due to Firestore permissions.
+- Health checks may use Firebase Web SDK and fail under real authorization.
+- Email health may be hardcoded healthy.
+- Gemini health may only check key presence.
+- Fake sample business records and fabricated counts may appear in dashboards.
+
+Required repairs:
+
+1. Use authorized Admin SDK persistence for audit events.
+2. Make security-sensitive audit records durable.
+3. Record administrator actions, actor, target, outcome and timestamp.
+4. Prevent unauthorized alteration or deletion of audit history.
+5. Implement meaningful database health checks.
+6. Implement meaningful Gemini availability checks without exposing secrets.
+7. Implement meaningful email provider health checks.
+8. Check worker/outbox status.
+9. Distinguish healthy, degraded, unavailable and unknown.
+10. Remove fabricated operational counts.
+11. Remove hardcoded Apex/TheRoots demo records from real production dashboards.
+12. Separate demo fixtures from production datasets.
+13. Make CEO intelligence reflect real persisted data.
+14. Never represent missing metrics as actual zero or fabricated sample values without labeling them.
+15. Ensure readiness checks genuinely reflect required production dependencies.
+
+---
+
+15. P1 — PUBLIC FORMS AND MISCELLANEOUS FUNCTIONALITY
+
+Inspect the complete user-facing application, not just backend code.
+
+Known issues to verify and repair:
+
+Public contact form
+
+"PublicPages.tsx:19–23"
+
+- Current behavior may only update local state and display success.
+- Implement real submission and persistence.
+- Validate fields.
+- Prevent spam and duplicate submissions.
+- Show genuine success/failure.
+
+Portfolio inquiry
+
+"PortfolioInquiryModal.tsx:47–69"
+
+- Verify that the fixed widget ID is valid.
+- Ensure structured profile information is actually processed.
+- Ensure the resulting inquiry belongs to the intended destination.
+- Prevent orphaned conversations.
+- Do not display lead success when only a chat response was received.
+
+Send reply
+
+"server.ts:620–730"
+
+- Repair database access.
+- Stop swallowing write errors.
+- Do not claim email was dispatched if it was not.
+- Verify authorization and tenant ownership.
+
+Browser storage
+
+"CustomerChatWidget.tsx:805–810"
+
+- Guard all localStorage/sessionStorage access.
+- Handle unavailable, corrupted and blocked storage.
+- Ensure visitor identity recovery is safe.
+- Test browser privacy modes and embedded iframe conditions.
+
+Streaming
+
+"widgetHandler.ts:1272–1305"
+
+- Current SSE wrapper may wait for complete generation and emit one chunk.
+- Implement actual streaming if the product advertises it.
+- Otherwise accurately represent the current response behavior.
+- Handle disconnects, timeouts, cancellation and partial failures.
+
+UI controls and readiness
+
+- "AIEmployeesTab.tsx:355–385": verify Notify on Release is a real subscription or remove the misleading interaction.
+- "employeeOnboarding.ts": verify whether sessionStorage-only state is appropriate.
+- "WorkspaceHome.tsx:315": implement or remove the empty clear-activity callback.
+- "AIEmployeesTab.tsx": replace hardcoded readiness states with real data.
+
+Do not redesign the entire interface during this security phase.
+
+Preserve the existing visual identity and functioning UX.
+
+---
+
+16. P1 — MULTI-INSTANCE RELIABILITY AND MEMORY
+
+Inspect:
+
+- "experienceHandler.ts"
+- "widgetConfigCache"
+- "conversationMemoryStore"
+- "brainCache"
+- "rateLimitMap"
+- Inquiry and handoff memory stores
+
+Known concerns:
+
+- Guest sessions may be process-local.
+- Server restarts may erase sessions.
+- Cloud Run horizontal scaling may split state.
+- In-memory caches may be unbounded.
+- Multiple instances may disagree about conversation ownership or processing status.
+
+Required repairs:
+
+1. Identify all process-local state.
+2. Classify it as disposable cache or durable business state.
+3. Move production-critical state to an appropriate shared durable store.
+4. Keep disposable caches tenant-scoped.
+5. Add bounded memory and expiration.
+6. Make concurrent operations safe.
+7. Ensure restart recovery.
+8. Ensure horizontal scaling does not break sessions, rate limiting, inquiry creation or handoff delivery.
+9. Document any deliberately retained in-memory optimization.
+
+---
+
+17. P2 — DORMANT AND MISLEADING ARCHITECTURE
+
+Investigate:
+
+- "modelRouter.ts"
+- "executeModelTask()"
+- Dormant provider adapters
+- "productKnowledgeEngine.ts"
+- "knowledgeSynthesizer.ts"
+- Other unused engines and services
+
+Required actions:
+
+1. Identify active and inactive code paths.
+2. Do not treat unused code as an active production vulnerability without evidence.
+3. Identify dead code, duplicate logic and misleading abstractions.
+4. Document dormant integrations.
+5. Remove code only if safe and justified.
+6. Avoid introducing unnecessary architecture.
+7. Preserve the active Gemini-only Alpha execution path.
+8. Document the actual production request flow.
+
+---
+
+18. DEPENDENCY, CONFIGURATION AND DEPLOYMENT AUDIT
+
+Inspect the entire project for:
+
+- Dependency vulnerabilities.
+- Unpinned or incompatible dependencies.
+- Missing environment variables.
+- Incorrect environment defaults.
+- Unsafe production fallback configuration.
+- Missing production build configuration.
+- Incorrect server startup scripts.
+- Missing deployment manifests.
+- Missing Firestore indexes.
+- Inconsistent widget.js copies.
+- Stale public assets.
+- Accidental source maps or secret exposure.
+- Missing CORS/origin restrictions.
+- Missing security headers.
+- Inadequate request/body limits.
+- Logging of private information.
+- Inconsistent API contracts.
+- Missing database migrations or schema validation.
+
+Known repository observations from the earlier inspection:
+
+- Approximately 72,000 lines.
+- No node_modules in the supplied archive.
+- No usable build verification was possible because dependencies were missing.
+- No npm test script was present.
+- No production server artifact was available in the inspected dist directory.
+- No conventional deployment manifest was identified.
+
+Recheck these observations rather than assuming they remain accurate.
+
+Do not claim the production build works unless it actually builds.
+
+Do not install arbitrary new dependency versions without checking compatibility.
+
+---
+
+19. COMPLETE TESTING REQUIREMENTS
+
+A repair is not complete merely because the code compiles.
+
+Create or improve an automated test suite.
+
+A. Security tests
+
+Test:
+
+- Cross-tenant reads.
+- Cross-tenant writes.
+- Widget ownership takeover.
+- Public Company Brain exposure.
+- Revoked administrator access.
+- Role escalation.
+- Forged visitor tokens.
+- Expired visitor tokens.
+- Forged chat history.
+- Simulation impersonation.
+- Cross-tenant cache collisions.
+- OAuth state replay.
+- OAuth session mismatch.
+- Path traversal.
+- SSRF and redirect validation.
+- Rate-limit bypass.
+- Unauthorized inquiry access.
+- Unauthorized handoff access.
+
+Use synthetic tenants and controlled test fixtures.
+
+B. Core functionality tests
+
+Test:
+
+- Visitor opens widget.
+- Visitor receives session token.
+- Visitor starts conversation.
+- Alpha responds using correct Company Brain.
+- Alpha refuses unsupported commercial claims.
+- Visitor submits inquiry.
+- Inquiry is durably stored.
+- Inquiry appears in correct tenant dashboard.
+- Visitor requests human support.
+- Handoff is durably stored.
+- Notification is queued and delivered.
+- Admin replies.
+- Visitor receives the reply.
+- Conversation ownership is preserved.
+- Widget settings save and reload.
+- Preview mode works without affecting production.
+- Contact form creates a real record.
+- Browser storage failure does not crash the widget.
+
+C. Multi-tenant tests
+
+Create at least three synthetic tenants:
+
+- Tenant A: SaaS business.
+- Tenant B: Clothing business.
+- Tenant C: Education business.
+
+Use completely different Company Brains.
+
+Verify:
+
+- No configuration leakage.
+- No pricing leakage.
+- No identity leakage.
+- No conversation leakage.
+- No inquiry leakage.
+- No analytics leakage.
+- No handoff leakage.
+- No administrator privilege leakage.
+- No cross-tenant cache contamination.
+
+D. Persistence tests
+
+Verify important records survive:
+
+- Page reload.
+- Browser restart.
+- Server restart.
+- Worker restart.
+- Multiple concurrent requests.
+- Multiple server instances, where test infrastructure permits.
+
+E. Regression tests
+
+Ensure existing working product functionality remains intact.
+
+Do not make all tests pass by deleting tests, weakening assertions or mocking the entire system.
+
+---
+
+20. IMPLEMENTATION EXECUTION STRATEGY
+
+Do not make uncontrolled edits across 72,000 lines.
+
+Work in dependency order.
+
+PHASE 0 — BASELINE
+
+- Inspect repository.
+- Map architecture.
+- Identify active execution paths.
+- Identify database schema and ownership relationships.
+- Record current build/test status.
+- Establish a baseline.
+- Create a change plan.
+
+PHASE 1 — CRITICAL SECURITY
+
+- Firestore rules.
+- Public configuration exposure.
+- Widget ownership.
+- Official widget isolation.
+- Administrator revocation.
+- OAuth secrets and CSRF.
+- Path traversal.
+
+PHASE 2 — BACKEND FOUNDATION
+
+- Firebase Admin SDK.
+- ADC.
+- Server authentication.
+- Tenant authorization.
+- Database persistence.
+- Error handling.
+
+PHASE 3 — CHAT AND IDENTITY
+
+- Visitor sessions.
+- Message authenticity.
+- Simulation security.
+- Tenant-scoped caching.
+- Idempotency.
+- Conversation ownership.
+
+PHASE 4 — CORE BUSINESS OPERATIONS
+
+- Inquiry persistence.
+- Human handoff.
+- Notification outbox.
+- Retries.
+- Admin replies.
+- Dashboard synchronization.
+
+PHASE 5 — ALPHA INTELLIGENCE
+
+- Company Brain grounding.
+- Tenant identity isolation.
+- Fallback correction.
+- Prompt injection protection.
+- Honest verification.
+- Industry-neutral testing.
+
+PHASE 6 — EXTERNAL ENDPOINTS
+
+- SSRF.
+- Public API abuse.
+- Rate limiting.
+- Analytics consent.
+- Privacy.
+- Public forms.
+
+PHASE 7 — OPERATIONS
+
+- Admin audit logs.
+- Health checks.
+- Real metrics.
+- Multi-instance reliability.
+- Memory management.
+
+PHASE 8 — REGRESSION AND RELEASE
+
+- Full automated tests.
+- Type checks.
+- Production build.
+- Security regression.
+- Deployment configuration.
+- Controlled staging smoke tests.
+
+After each phase:
+
+1. Review changed files.
+2. Run relevant tests.
+3. Review regressions.
+4. Record unresolved issues.
+5. Continue only when dependencies are stable.
+
+Do not silently skip a failed phase.
+
+---
+
+21. RELEASE ACCEPTANCE CRITERIA
+
+AI Workforce cannot be marked ready for public production unless:
+
+1. Public endpoints expose no private Company Brain data.
+2. Cross-tenant access and ownership takeover tests pass.
+3. Revoked administrators lose all protected access.
+4. No exposed active credentials remain in source or public assets.
+5. Backend authorization uses verified identity and tenant ownership.
+6. Visitor sessions cannot be forged or reused across tenants.
+7. Client history cannot impersonate Alpha.
+8. Simulation cannot impersonate production tenants.
+9. Cache collisions cannot leak data.
+10. Inquiries are durably persisted.
+11. Handoffs are durably persisted and notifications reliably processed.
+12. Alpha respects Company Brain restrictions.
+13. Generic Alpha responses contain no other tenant's identity or pricing.
+14. Public endpoints have appropriate abuse controls.
+15. SSRF and path traversal defenses pass controlled tests.
+16. Consent and visitor tracking behave correctly.
+17. Admin audit logs are durable.
+18. Operational health indicators reflect actual service state.
+19. Production build and type checks pass.
+20. End-to-end tests pass.
+21. Existing product functionality survives regression testing.
+
+Any unresolved critical vulnerability means NO-GO.
+
+Any unverified fix must be marked UNVERIFIED.
+
+---
+
+22. REQUIRED FINAL ENGINEERING REPORT
+
+At completion, produce a detailed report with these sections:
+
+A. Executive summary
+
+- Original system condition.
+- Repairs completed.
+- Current release readiness.
+- Remaining blockers.
+
+B. Complete issue register
+
+For every finding:
+
+Field| Required information
+ID| Unique issue ID
+Severity| P0/P1/P2/P3
+Category| Security/backend/AI/data/UI/operations
+Original file| Exact path and relevant lines
+Root cause| Actual technical explanation
+Repair| Exact change implemented
+New files| Any additional files
+Tests| Tests executed
+Evidence| Actual test output or code evidence
+Status| FIXED / PARTIALLY FIXED / UNFIXED / UNVERIFIED
+
+C. Modified files
+
+List every modified, created and deleted file with a reason.
+
+D. Security results
+
+Provide results of every security test, including failures.
+
+E. Functional results
+
+Provide actual results of chat, Company Brain, inquiry, handoff, admin, analytics and widget tests.
+
+F. Build results
+
+Report:
+
+- Dependency installation.
+- TypeScript checks.
+- Build.
+- Test suite.
+- Linting, if configured.
+- Deployment validation.
+
+Never fabricate passing results.
+
+G. Remaining risks
+
+List everything that still requires:
+
+- Manual configuration.
+- Credential rotation.
+- Firebase console changes.
+- Environment configuration.
+- External provider verification.
+- Staging testing.
+- Human approval.
+
+H. Final release verdict
+
+Choose exactly one:
+
+- GO: All release acceptance criteria are met and verified.
+- CONDITIONAL GO: No known critical vulnerability remains, but clearly documented non-critical conditions remain.
+- NO-GO: Critical issues or required verification remain incomplete.
+
+Explain the decision.
+
+---
+
+23. ABSOLUTE RESTRICTIONS
+
+- Do not deploy to production.
+- Do not delete production data.
+- Do not rotate credentials without explicit authorized access.
+- Do not change billing or payment configuration.
+- Do not make irreversible database migrations without a documented rollback strategy and approval.
+- Do not weaken security policies.
+- Do not expose secrets in output.
+- Do not upload secrets to external services.
+- Do not invent test results.
+- Do not claim a production vulnerability is confirmed when it has only been identified statically.
+- Do not claim a fix is verified when only its code has been edited.
+- Do not replace real functionality with mocks.
+- Do not make unnecessary UI changes.
+- Do not change the core product vision.
+- Do not add additional paid AI providers.
+- Do not introduce tenant-specific hardcoding.
+- Do not silently abandon unfinished work.
+
+If an issue requires access to an external console or production environment, implement all safe code-side repairs and clearly identify the remaining external action.
+
+If you encounter an architectural conflict, investigate it and explain the trade-off before making a destructive change.
+
+If the task exceeds the available context or execution budget, finish the current safe unit of work, save a detailed checkpoint and list the exact remaining tasks. Never pretend the entire mission is complete.
+
+---
+
+FINAL DIRECTIVE
+
+You are not being asked to make AI Workforce look production-ready.
+
+You are being asked to make it technically trustworthy.
+
+Preserve its existing architecture where sound. Repair what is broken. Remove what is unsafe. Verify what matters. Discover what was missed.
+
+Every tenant's data must remain theirs. Every successful operation must be real. Every Alpha answer must respect its Company's Brain. Every administrator action must be authorized. Every production claim must have evidence.
+
+Do not stop at recommendations.
+
+INSPECT → TRACE → REPAIR → TEST → VERIFY → REPORT.
+
+Begin with Phase 0. Then execute the complete mandate in dependency order.
+
+The final result must be a genuinely hardened AI Workforce codebase, not another audit document.

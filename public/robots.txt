@@ -1,0 +1,38 @@
+# Robots.txt for AI Workforce Official Website (https://aiworkforce.ai.studio/)
+# Optimized for Web Crawlers, Search Engines, and AI Discovery Agents
+
+User-agent: *
+Allow: /
+Allow: /widget.js
+Allow: /chat-widget.js
+Allow: /assets/
+Allow: /media/
+Allow: /og-image.jpg
+Allow: /twitter-image.jpg
+Allow: /favicon.svg
+Allow: /favicon.png
+Allow: /site.webmanifest
+Allow: /sitemap.xml
+
+# Protect internal workspace API routes from search indexing
+Disallow: /api/
+
+# Specialized search and discovery crawlers
+User-agent: Googlebot
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: GPTBot
+Allow: /
+
+User-agent: Applebot
+Allow: /
+
+# Canonical Sitemap and Host
+Sitemap: https://aiworkforce.ai.studio/sitemap.xml
+Host: https://aiworkforce.ai.studio

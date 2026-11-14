@@ -1,0 +1,432 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Root user workspace profile and onboarding state",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "onboarding_completed": { "type": "boolean" },
+        "onboarding_step": { "type": "number" },
+        "onboarding_draft": { "type": "object" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "CompanyProfile": {
+      "title": "CompanyProfile",
+      "description": "Private Company Brain containing verified products, rules, and sales guidelines",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "industry": { "type": "string" },
+        "businessType": { "type": "string" },
+        "products": { "type": "string" },
+        "locations": { "type": "string" },
+        "minOrder": { "type": "string" },
+        "tone": { "type": "string" },
+        "businessRules": { "type": "string" },
+        "description": { "type": "string" },
+        "primaryGoal": { "type": "string" },
+        "website": { "type": "string" },
+        "targetCustomers": { "type": "string" },
+        "serviceArea": { "type": "string" },
+        "unknownQuestionBehavior": { "type": "string" },
+        "offerings": { "type": "array" },
+        "country": { "type": "string" },
+        "currency": { "type": "string" },
+        "timezone": { "type": "string" },
+        "locale": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["name", "industry", "products"]
+    },
+    "InquiryLead": {
+      "title": "InquiryLead",
+      "description": "Inbound commercial lead captured from website or simulator",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customer_name": { "type": "string" },
+        "companyName": { "type": "string" },
+        "contactName": { "type": "string" },
+        "source": { "type": "string" },
+        "channel": { "type": "string" },
+        "lead_temperature": { "type": "string" },
+        "lead_score": { "type": "string" },
+        "lead_reason": { "type": "string" },
+        "temperature_reason": { "type": "string" },
+        "status": { "type": "string" },
+        "customer_intent": { "type": "string" },
+        "original_message": { "type": "string" },
+        "raw_inquiry": { "type": "string" },
+        "product_or_service": { "type": "string" },
+        "quantity": { "type": "string" },
+        "location": { "type": "string" },
+        "deadline": { "type": "string" },
+        "budget": { "type": "string" },
+        "requirements": { "type": "array" },
+        "customer_facts": { "type": "array" },
+        "missing_information": { "type": "array" },
+        "recommended_action": { "type": "string" },
+        "recommended_next_action": { "type": "string" },
+        "draft_reply": { "type": "string" },
+        "suggested_reply": { "type": "string" },
+        "sales_summary": { "type": "string" },
+        "created_at": { "type": "string" },
+        "last_action_at": { "type": "string" },
+        "structured_profile": { "type": "object" },
+        "inquiry_registered": { "type": "boolean" }
+      },
+      "required": ["id", "customer_name", "status"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Operational activity and audit trail entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "leadId": { "type": "string" },
+        "employeeName": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "type": { "type": "string" }
+      },
+      "required": ["id", "title", "timestamp"]
+    },
+    "SalesTask": {
+      "title": "SalesTask",
+      "description": "Commercial follow-up or review task assigned to human rep",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "leadId": { "type": "string" },
+        "companyName": { "type": "string" },
+        "title": { "type": "string" },
+        "leadScore": { "type": "string" },
+        "priority": { "type": "string" },
+        "dueDate": { "type": "string" },
+        "status": { "type": "string" },
+        "actionType": { "type": "string" }
+      },
+      "required": ["id", "title", "status"]
+    },
+    "WidgetConfig": {
+      "title": "WidgetConfig",
+      "description": "Private owner website widget configuration and styling",
+      "type": "object",
+      "properties": {
+        "widget_id": { "type": "string" },
+        "user_id": { "type": "string" },
+        "business_name": { "type": "string" },
+        "welcome_message": { "type": "string" },
+        "theme_color": { "type": "string" },
+        "is_active": { "type": "boolean" },
+        "position": { "type": "string" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["widget_id", "business_name"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Multi-turn website visitor chat thread",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "widget_id": { "type": "string" },
+        "visitor_id": { "type": "string" },
+        "customer_name": { "type": "string" },
+        "messages": { "type": "array" },
+        "lead_id": { "type": "string" },
+        "structured_profile": { "type": "object" },
+        "human_owned": { "type": "boolean" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["id", "widget_id", "messages"]
+    },
+    "PublicWidget": {
+      "title": "PublicWidget",
+      "description": "Public widget display projection for embedded scripts (contains NO private Company Brain fields)",
+      "type": "object",
+      "properties": {
+        "widget_id": { "type": "string" },
+        "user_id": { "type": "string" },
+        "business_name": { "type": "string" },
+        "welcome_message": { "type": "string" },
+        "theme_color": { "type": "string" },
+        "position": { "type": "string" },
+        "public_summary": { "type": "object" },
+        "quick_options": { "type": "array" },
+        "is_active": { "type": "boolean" },
+        "config_version": { "type": "number" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["widget_id", "business_name"]
+    },
+    "WidgetLookup": {
+      "title": "WidgetLookup",
+      "description": "Server-only mapping from widget_id to immutable owner tenant user_id",
+      "type": "object",
+      "properties": {
+        "widget_id": { "type": "string" },
+        "user_id": { "type": "string" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["widget_id", "user_id"]
+    },
+    "SystemAdmin": {
+      "title": "SystemAdmin",
+      "description": "Authoritative system administrator role and status record",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "status": { "type": "string" },
+        "assignedBy": { "type": "string" },
+        "assignedAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "role", "status"]
+    },
+    "SystemAdminAssignment": {
+      "title": "SystemAdminAssignment",
+      "description": "Role assignment record claimed on verified admin login",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "email", "role", "status"]
+    },
+    "SystemSettings": {
+      "title": "SystemSettings",
+      "description": "System-wide integrations, OAuth tokens, and platform settings",
+      "type": "object",
+      "properties": {
+        "refreshToken": { "type": "string" },
+        "accessToken": { "type": "string" },
+        "channelTitle": { "type": "string" },
+        "connectedAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "SystemAdminInvitation": {
+      "title": "SystemAdminInvitation",
+      "description": "Workspace invitation tokens for administrative accounts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "email", "role"]
+    },
+    "OAuthState": {
+      "title": "OAuthState",
+      "description": "Server-only ephemeral CSRF state bound to authenticated admin UID",
+      "type": "object",
+      "properties": {
+        "state": { "type": "string" },
+        "uid": { "type": "string" },
+        "provider": { "type": "string" },
+        "redirectUri": { "type": "string" },
+        "expiresAt": { "type": "number" },
+        "used": { "type": "boolean" }
+      },
+      "required": ["state", "uid", "provider", "expiresAt"]
+    },
+    "HandoffRecord": {
+      "title": "HandoffRecord",
+      "description": "Durable human handoff request linked to a tenant conversation",
+      "type": "object",
+      "properties": {
+        "handoff_id": { "type": "string" },
+        "tenant_id": { "type": "string" },
+        "conversation_id": { "type": "string" },
+        "visitor_id": { "type": "string" },
+        "status": { "type": "string" },
+        "created_at": { "type": "string" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["handoff_id", "tenant_id", "conversation_id", "status"]
+    },
+    "NotificationOutbox": {
+      "title": "NotificationOutbox",
+      "description": "Durable notification delivery queue with lease locking and retry backoff",
+      "type": "object",
+      "properties": {
+        "outbox_id": { "type": "string" },
+        "tenant_id": { "type": "string" },
+        "recipient_email": { "type": "string" },
+        "status": { "type": "string" },
+        "attempts": { "type": "number" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["outbox_id", "tenant_id", "status"]
+    },
+    "ContactSubmission": {
+      "title": "ContactSubmission",
+      "description": "Inbound contact or portfolio request persisted durably by server",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "message": { "type": "string" },
+        "source": { "type": "string" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["id", "email", "created_at"]
+    },
+    "VisitorSessionRecord": {
+      "title": "VisitorSessionRecord",
+      "description": "Non-sensitive website visitor sessions for monitoring",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "visitorId": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "widgetId": { "type": "string" },
+        "companyName": { "type": "string" },
+        "firstSeenAt": { "type": "string" },
+        "lastSeenAt": { "type": "string" },
+        "device": { "type": "string" },
+        "browser": { "type": "string" },
+        "os": { "type": "string" },
+        "landingPage": { "type": "string" },
+        "referrer": { "type": "string" },
+        "widgetOpened": { "type": "boolean" },
+        "messagesCount": { "type": "number" },
+        "inquirySubmitted": { "type": "boolean" },
+        "durationSeconds": { "type": "number" }
+      },
+      "required": ["id", "visitorId", "firstSeenAt", "lastSeenAt"]
+    },
+    "MarketingBrain": {
+      "title": "MarketingBrain",
+      "description": "Autonomous Marketing Co-Founder knowledge base and brand strategy",
+      "type": "object",
+      "properties": {
+        "brandVoice": { "type": "string" },
+        "pillars": { "type": "array" },
+        "updatedAt": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User workspace root document"
+    },
+    "/users/{userId}/company_profile/{profileId}": {
+      "schema": "CompanyProfile",
+      "description": "Private Company profile and Company Brain parameters"
+    },
+    "/users/{userId}/inquiries/{inquiryId}": {
+      "schema": "InquiryLead",
+      "description": "Inbound customer inquiries and qualified leads"
+    },
+    "/users/{userId}/leads/{leadId}": {
+      "schema": "InquiryLead",
+      "description": "Captured sales leads from website visitor conversations"
+    },
+    "/users/{userId}/activities/{activityId}": {
+      "schema": "ActivityLog",
+      "description": "Operational activities and event audit logs"
+    },
+    "/users/{userId}/tasks/{taskId}": {
+      "schema": "SalesTask",
+      "description": "Sales follow-up and review tasks"
+    },
+    "/users/{userId}/widget_config/{configId}": {
+      "schema": "WidgetConfig",
+      "description": "Private website chat widget settings"
+    },
+    "/users/{userId}/conversations/{conversationId}": {
+      "schema": "Conversation",
+      "description": "Website visitor chat threads"
+    },
+    "/public_widgets/{widgetId}": {
+      "schema": "PublicWidget",
+      "description": "Sanitized public widget configuration projection for embedded website scripts"
+    },
+    "/widget_lookup/{widgetId}": {
+      "schema": "WidgetLookup",
+      "description": "Server-only mapping from widget_id to immutable owner tenant ID"
+    },
+    "/system_admins/{adminId}": {
+      "schema": "SystemAdmin",
+      "description": "System admin roles and RBAC accounts"
+    },
+    "/system_admin_assignments/{assignmentId}": {
+      "schema": "SystemAdminAssignment",
+      "description": "Pending and claimed admin role assignments"
+    },
+    "/system_admin_invitations/{invitationId}": {
+      "schema": "SystemAdminInvitation",
+      "description": "Admin workspace invitations"
+    },
+    "/system_settings/{settingId}": {
+      "schema": "SystemSettings",
+      "description": "System integrations and credentials settings"
+    },
+    "/oauth_states/{stateId}": {
+      "schema": "OAuthState",
+      "description": "Server-only OAuth CSRF state records"
+    },
+    "/handoffs/{handoffId}": {
+      "schema": "HandoffRecord",
+      "description": "Durable human handoff queue records"
+    },
+    "/notification_outbox/{outboxId}": {
+      "schema": "NotificationOutbox",
+      "description": "Durable notification delivery outbox"
+    },
+    "/contact_submissions/{submissionId}": {
+      "schema": "ContactSubmission",
+      "description": "Server-persisted public contact and portfolio inquiry records"
+    },
+    "/system_audit_logs/{logId}": {
+      "schema": "ActivityLog",
+      "description": "System-wide immutable audit trail for privileged operations"
+    },
+    "/system_security_events/{eventId}": {
+      "schema": "ActivityLog",
+      "description": "System security events and threat monitor records"
+    },
+    "/system_health_probes/{probeId}": {
+      "schema": "ActivityLog",
+      "description": "System health probe latency checks"
+    },
+    "/system_visitor_sessions/{sessionId}": {
+      "schema": "VisitorSessionRecord",
+      "description": "Live website visitor sessions for CEO real-time telemetry"
+    },
+    "/marketing_brain/{docId}": {
+      "schema": "MarketingBrain",
+      "description": "Marketing Co-Founder strategy brain"
+    },
+    "/marketing_research/{docId}": {
+      "schema": "ActivityLog",
+      "description": "Marketing intelligence and trends"
+    },
+    "/marketing_content/{docId}": {
+      "schema": "ActivityLog",
+      "description": "Marketing content drafts and posts"
+    },
+    "/marketing_settings/{docId}": {
+      "schema": "SystemSettings",
+      "description": "Marketing publishing schedule and configurations"
+    },
+    "/marketing_audit_logs/{docId}": {
+      "schema": "ActivityLog",
+      "description": "Marketing audit trail records"
+    }
+  }
+}

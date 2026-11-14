@@ -1,0 +1,94 @@
+{
+  "$schema": "https://raw.githubusercontent.com/firebase/firebase-tools/master/schema/firestore-blueprint.json",
+  "entities": {
+    "users": {
+      "title": "User Workspace Profile",
+      "description": "User profile with workspace information and initialized state",
+      "fields": {
+        "email": {
+          "type": "string",
+          "description": "User email address"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Account creation ISO timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Account update ISO timestamp"
+        }
+      },
+      "subcollections": {
+        "company_profile": {
+          "title": "Company Brain",
+          "description": "The user's verified business rules, products, and configurations",
+          "fields": {
+            "name": { "type": "string" },
+            "industry": { "type": "string" },
+            "products": { "type": "string" },
+            "locations": { "type": "string" },
+            "minOrder": { "type": "string" },
+            "tone": { "type": "string" },
+            "businessRules": { "type": "string" },
+            "updatedAt": { "type": "string" }
+          }
+        },
+        "inquiries": {
+          "title": "Inquiry Lead",
+          "description": "Customer inquiries and lead analysis records for this user",
+          "fields": {
+            "user_id": { "type": "string" },
+            "customer_name": { "type": "string" },
+            "contactName": { "type": "string" },
+            "source": { "type": "string" },
+            "original_message": { "type": "string" },
+            "product_or_service": { "type": "string" },
+            "quantity": { "type": "string" },
+            "location": { "type": "string" },
+            "deadline": { "type": "string" },
+            "budget": { "type": "string" },
+            "requirements": { "type": "string" },
+            "lead_temperature": { "type": "string" },
+            "lead_reason": { "type": "string" },
+            "status": { "type": "string" },
+            "customer_intent": { "type": "string" },
+            "missing_information": { "type": "string" },
+            "recommended_action": { "type": "string" },
+            "draft_reply": { "type": "string" },
+            "sales_summary": { "type": "string" },
+            "created_at": { "type": "string" },
+            "last_action_at": { "type": "string" }
+          }
+        },
+        "activities": {
+          "title": "Activity Log",
+          "description": "Audit trail of AI Sales Coordinator actions for this user",
+          "fields": {
+            "user_id": { "type": "string" },
+            "leadId": { "type": "string" },
+            "employeeName": { "type": "string" },
+            "title": { "type": "string" },
+            "description": { "type": "string" },
+            "timestamp": { "type": "string" },
+            "type": { "type": "string" }
+          }
+        },
+        "tasks": {
+          "title": "Sales Task",
+          "description": "Sales tasks created for human review",
+          "fields": {
+            "user_id": { "type": "string" },
+            "leadId": { "type": "string" },
+            "companyName": { "type": "string" },
+            "title": { "type": "string" },
+            "leadScore": { "type": "string" },
+            "priority": { "type": "string" },
+            "dueDate": { "type": "string" },
+            "status": { "type": "string" },
+            "actionType": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}
