@@ -10,6 +10,7 @@ import {
   DeploymentType,
   WidgetStudioConfig,
   WidgetVisualMode,
+  WidgetThemeMode,
   WidgetLauncherType,
   WidgetLauncherSize,
   WidgetLauncherShape,
@@ -78,6 +79,8 @@ export interface StoredMemoryConversation {
 export interface MemoryIdempotencyRecord {
   reply: string;
   conversation_id: string;
+  client_message_id?: string;
+  reply_to_client_message_id?: string;
   options: string[];
   sentiment?: string;
   detected_intent?: string;
@@ -95,6 +98,7 @@ const IDEMPOTENCY_MEMORY_TTL_MS = 2 * 60 * 60 * 1000;
 
 export const conversationMemoryStore = new Map<string, StoredMemoryConversation>();
 export const idempotencyMemoryStore = new Map<string, MemoryIdempotencyRecord>();
+export const inFlightWidgetTurns = new Map<string, Promise<any>>();
 
 export function buildConversationMemoryKey(tenantId: string, conversationId: string, isSimulation = false): string {
   return `${isSimulation ? 'sim' : tenantId}::${conversationId}`;
@@ -267,6 +271,7 @@ export interface PublicWidgetConfig {
   design_style?: 'simple' | 'attractive_3d';
   deploymentType?: DeploymentType;
   mode?: WidgetVisualMode;
+  themeMode?: WidgetThemeMode;
   launcherType?: WidgetLauncherType;
   logoUrl?: string;
   primaryColor?: string;
@@ -428,6 +433,7 @@ export function applyStudioConfigToPublicWidget(
     position: studio.launcherPosition,
     design_style: studio.mode,
     mode: studio.mode,
+    themeMode: studio.themeMode,
     launcherType: studio.launcherType,
     logoUrl: studio.logoUrl,
     primaryColor: studio.primaryColor,
@@ -454,10 +460,12 @@ export function applyStudioConfigToPublicWidget(
   };
 }
 
-export function invalidateWidgetCache(widgetId: string) {
+export function invalidateWidgetCache(widgetId?: string) {
   if (widgetId) {
     widgetConfigCache.delete(widgetId);
     invalidateBrainCache(widgetId);
+  } else {
+    widgetConfigCache.clear();
   }
 }
 
@@ -556,6 +564,7 @@ export async function savePublicWidgetConfig(
     config_version: nextVersion,
     config_timestamp: configTimestamp,
     mode: studio.mode,
+    themeMode: studio.themeMode,
     launcherType: studio.launcherType,
     logoUrl: studio.logoUrl,
     primaryColor: studio.primaryColor,
@@ -709,59 +718,56 @@ export async function getUserWidgetConfig(userId: string): Promise<PublicWidgetC
   );
 }
 
+export function getOfficialPlatformWidget(widgetId = 'official-ai-workforce'): PublicWidgetConfig {
+  const canonicalOfficialStudio: Partial<WidgetStudioConfig> = {
+    mode: 'attractive_3d',
+    themeMode: 'dark',
+    launcherType: 'ai_workforce',
+    primaryColor: '#09090B',
+    secondaryColor: '#FFFFFF',
+    backgroundColor: '#09090B',
+    textColor: '#F4F4F5',
+    aiMessageColor: '#18181B',
+    aiMessageTextColor: '#F4F4F5',
+    userMessageColor: '#FFFFFF',
+    userMessageTextColor: '#09090B',
+    gradientEnabled: false,
+    gradientType: 'none',
+    launcherSize: 'medium',
+    launcherShape: 'circle',
+    borderRadius: 20,
+    shadowIntensity: 'deep',
+    glowIntensity: 'none',
+    animationIntensity: 'subtle',
+    launcherPosition: 'bottom-right',
+  };
+
+  const base: PublicWidgetConfig = {
+    widget_id: widgetId,
+    business_name: 'AI Workforce',
+    welcome_message: "Hey — I’m Alpha, AI Workforce’s Sales Manager. What can I help you with?",
+    theme_color: '#09090B',
+    is_active: true,
+    position: 'bottom-right',
+    design_style: 'attractive_3d',
+    themeMode: 'dark',
+    company_profile: AI_WORKFORCE_OFFICIAL_PROFILE,
+    user_id: PLATFORM_OFFICIAL_TENANT_ID,
+    quick_options: generateInitialQuickOptions(AI_WORKFORCE_OFFICIAL_PROFILE),
+  };
+
+  return applyStudioConfigToPublicWidget(base, canonicalOfficialStudio, '#09090B');
+}
+
 export async function resolvePublicWidget(widgetId: string): Promise<PublicWidgetConfig | null> {
   const cleanWidgetId = typeof widgetId === 'string' ? widgetId.trim() : '';
   if (!cleanWidgetId) {
     return null;
   }
 
+  // Official AI Workforce widget identity is strictly immutable and isolated from Firestore public_widgets overrides.
   if (isReservedOfficialWidgetId(cleanWidgetId)) {
-    const base: PublicWidgetConfig = {
-      widget_id: cleanWidgetId,
-      business_name: 'AI Workforce',
-      welcome_message: "Hey — I’m Alpha, AI Workforce’s Sales Manager. What can I help you with?",
-      theme_color: '#0f172a',
-      is_active: true,
-      position: 'bottom-right',
-      design_style: 'attractive_3d',
-      company_profile: AI_WORKFORCE_OFFICIAL_PROFILE,
-      user_id: PLATFORM_OFFICIAL_TENANT_ID,
-      quick_options: generateInitialQuickOptions(AI_WORKFORCE_OFFICIAL_PROFILE),
-    };
-
-    const cached = widgetConfigCache.get(cleanWidgetId) || widgetConfigCache.get('official-ai-workforce');
-    if (cached && Date.now() < cached.expiry) {
-      const cfg = applyStudioConfigToPublicWidget(base, cached.config.studioConfig || cached.config);
-      cfg.business_name = 'AI Workforce';
-      cfg.user_id = PLATFORM_OFFICIAL_TENANT_ID;
-      cfg.company_profile = AI_WORKFORCE_OFFICIAL_PROFILE;
-      return cfg;
-    }
-
-    if (hasAdminCredentials()) {
-      try {
-        const snap = await getAdminDb().collection('public_widgets').doc(cleanWidgetId).get();
-        if (snap.exists) {
-          const d = snap.data();
-          if (d) {
-            const mergedBase = {
-              ...base,
-              welcome_message: d.welcome_message || base.welcome_message,
-              theme_color: d.theme_color || d.primaryColor || base.theme_color,
-              design_style: d.design_style || d.mode || base.design_style,
-              is_active: d.is_active !== false,
-            };
-            const cfg = applyStudioConfigToPublicWidget(mergedBase, d.studioConfig || d);
-            cfg.business_name = 'AI Workforce';
-            cfg.user_id = PLATFORM_OFFICIAL_TENANT_ID;
-            cfg.company_profile = AI_WORKFORCE_OFFICIAL_PROFILE;
-            return cfg;
-          }
-        }
-      } catch {}
-    }
-
-    return applyStudioConfigToPublicWidget(base, DEFAULT_WIDGET_STUDIO_CONFIG);
+    return getOfficialPlatformWidget(cleanWidgetId);
   }
 
   const cached = widgetConfigCache.get(cleanWidgetId);
@@ -1038,6 +1044,8 @@ async function prepareWidgetChatContext(body: any): Promise<PreparedWidgetChatCo
           earlyResponse: {
             reply: cachedIdempotent.reply,
             conversation_id: cachedIdempotent.conversation_id,
+            client_message_id: cachedIdempotent.client_message_id || String(clientMessageId),
+            reply_to_client_message_id: cachedIdempotent.reply_to_client_message_id || String(clientMessageId),
             options: cachedIdempotent.options || [],
             sentiment: cachedIdempotent.sentiment,
             detected_intent: cachedIdempotent.detected_intent,
@@ -1047,6 +1055,7 @@ async function prepareWidgetChatContext(body: any): Promise<PreparedWidgetChatCo
             db_confirmed: Boolean(cachedIdempotent.db_confirmed),
             visitor_session_token,
             is_idempotent_retry: true,
+            deduplicated: true,
           },
         };
       }
@@ -1056,32 +1065,38 @@ async function prepareWidgetChatContext(body: any): Promise<PreparedWidgetChatCo
     if (memConv && Array.isArray(memConv.messages)) {
       authoritativeMessages = memConv.messages;
       if (clientMessageId) {
-        const existingIdx = memConv.messages.findIndex(
-          (m: any) => m.metadata?.client_message_id === clientMessageId
-        );
-        if (existingIdx !== -1 && existingIdx < memConv.messages.length - 1) {
-          const storedReplyMsg = memConv.messages[existingIdx + 1];
-          if (storedReplyMsg && storedReplyMsg.sender === 'assistant') {
-            const visitor_session_token = safeIssueVisitorSessionToken({
-              tenant_id: effectiveUserId,
-              widget_id: widgetConfig.widget_id,
-              visitor_id: effectiveVisitorId,
+        const existingReply =
+          memConv.messages.find((m: any) => m.sender === 'assistant' && m.metadata?.reply_to_client_message_id === clientMessageId) ||
+          (() => {
+            const idx = memConv.messages.findIndex((m: any) => m.metadata?.client_message_id === clientMessageId);
+            return idx !== -1 && idx < memConv.messages.length - 1 && memConv.messages[idx + 1]?.sender === 'assistant'
+              ? memConv.messages[idx + 1]
+              : undefined;
+          })();
+        if (existingReply) {
+          const visitor_session_token = safeIssueVisitorSessionToken({
+            tenant_id: effectiveUserId,
+            widget_id: widgetConfig.widget_id,
+            visitor_id: effectiveVisitorId,
+            conversation_id: convId,
+          });
+          return {
+            earlyResponse: {
+              reply: existingReply.text,
               conversation_id: convId,
-            });
-            return {
-              earlyResponse: {
-                reply: storedReplyMsg.text,
-                conversation_id: convId,
-                options: storedReplyMsg.options || [],
-                sentiment: storedReplyMsg.sentiment,
-                detected_intent: storedReplyMsg.detected_intent,
-                escalated_to_care: storedReplyMsg.escalated_to_care,
-                db_confirmed: Boolean(storedReplyMsg.metadata?.db_confirmed),
-                visitor_session_token,
-                is_idempotent_retry: true,
-              },
-            };
-          }
+              message_id: existingReply.message_id,
+              client_message_id: String(clientMessageId),
+              reply_to_client_message_id: String(clientMessageId),
+              options: existingReply.options || [],
+              sentiment: existingReply.sentiment,
+              detected_intent: existingReply.detected_intent,
+              escalated_to_care: existingReply.escalated_to_care,
+              db_confirmed: Boolean(existingReply.metadata?.db_confirmed),
+              visitor_session_token,
+              is_idempotent_retry: true,
+              deduplicated: true,
+            },
+          };
         }
       }
     }
@@ -1108,30 +1123,38 @@ async function prepareWidgetChatContext(body: any): Promise<PreparedWidgetChatCo
             authoritativeMessages = messages;
           }
           if (clientMessageId) {
-            const existingIdx = messages.findIndex((m: any) => m.metadata?.client_message_id === clientMessageId);
-            if (existingIdx !== -1 && existingIdx < messages.length - 1) {
-              const storedReplyMsg = messages[existingIdx + 1];
-              if (storedReplyMsg && storedReplyMsg.sender === 'assistant') {
-                const visitor_session_token = safeIssueVisitorSessionToken({
-                  tenant_id: effectiveUserId,
-                  widget_id: widgetConfig.widget_id,
-                  visitor_id: effectiveVisitorId,
+            const storedReplyMsg =
+              messages.find((m: any) => m.sender === 'assistant' && m.metadata?.reply_to_client_message_id === clientMessageId) ||
+              (() => {
+                const idx = messages.findIndex((m: any) => m.metadata?.client_message_id === clientMessageId);
+                return idx !== -1 && idx < messages.length - 1 && messages[idx + 1]?.sender === 'assistant'
+                  ? messages[idx + 1]
+                  : undefined;
+              })();
+            if (storedReplyMsg) {
+              const visitor_session_token = safeIssueVisitorSessionToken({
+                tenant_id: effectiveUserId,
+                widget_id: widgetConfig.widget_id,
+                visitor_id: effectiveVisitorId,
+                conversation_id: convId,
+              });
+              return {
+                earlyResponse: {
+                  reply: storedReplyMsg.text,
                   conversation_id: convId,
-                });
-                return {
-                  earlyResponse: {
-                    reply: storedReplyMsg.text,
-                    conversation_id: convId,
-                    options: storedReplyMsg.options || [],
-                    sentiment: storedReplyMsg.sentiment,
-                    detected_intent: storedReplyMsg.detected_intent,
-                    escalated_to_care: storedReplyMsg.escalated_to_care,
-                    db_confirmed: true,
-                    visitor_session_token,
-                    is_idempotent_retry: true,
-                  },
-                };
-              }
+                  message_id: storedReplyMsg.message_id,
+                  client_message_id: String(clientMessageId),
+                  reply_to_client_message_id: String(clientMessageId),
+                  options: storedReplyMsg.options || [],
+                  sentiment: storedReplyMsg.sentiment,
+                  detected_intent: storedReplyMsg.detected_intent,
+                  escalated_to_care: storedReplyMsg.escalated_to_care,
+                  db_confirmed: true,
+                  visitor_session_token,
+                  is_idempotent_retry: true,
+                  deduplicated: true,
+                },
+              };
             }
           }
         }
@@ -1331,7 +1354,9 @@ async function finalizeAndPersistWidgetTurn(ctx: PreparedWidgetChatContext, chat
     sender: 'customer',
     text: message,
     timestamp: nowIso,
-    metadata: { client_message_id: clientMessageId },
+    metadata: {
+      ...(clientMessageId ? { client_message_id: String(clientMessageId) } : {}),
+    },
   };
 
   const assistantMsg: StoredConversationMessage = {
@@ -1346,6 +1371,7 @@ async function finalizeAndPersistWidgetTurn(ctx: PreparedWidgetChatContext, chat
     grounded: Boolean(chatResult.grounded_in_brain),
     grounding_source: companyProfile?.name || 'Company Brain',
     metadata: {
+      ...(clientMessageId ? { reply_to_client_message_id: String(clientMessageId) } : {}),
       inquiry_registered: chatResult.inquiry_registered,
       published: true,
       delivered: true,
@@ -1507,6 +1533,8 @@ async function finalizeAndPersistWidgetTurn(ctx: PreparedWidgetChatContext, chat
     idempotencyMemoryStore.set(idempKey, {
       reply: chatResult.reply,
       conversation_id: convId,
+      client_message_id: String(clientMessageId),
+      reply_to_client_message_id: String(clientMessageId),
       options: chatResult.options || [],
       sentiment: chatResult.sentiment,
       detected_intent: chatResult.detected_intent,
@@ -1527,6 +1555,15 @@ async function finalizeAndPersistWidgetTurn(ctx: PreparedWidgetChatContext, chat
 
   return {
     ...chatResult,
+    conversation_id: convId,
+    message_id: assistantMsg.message_id,
+    customer_message_id: customerMsg.message_id,
+    ...(clientMessageId
+      ? {
+          client_message_id: String(clientMessageId),
+          reply_to_client_message_id: String(clientMessageId),
+        }
+      : {}),
     db_confirmed: finalDbConfirmed,
     ...(handoffId ? { handoff_id: handoffId, handoff_persisted: handoffPersisted } : {}),
     visitor_session_token,
@@ -1539,12 +1576,39 @@ export async function handleWidgetChat(body: any) {
     return ctx.earlyResponse;
   }
 
-  const chatResult = await processWebsiteChatMessage(ctx.chatRequest);
-  if (chatResult.timing_metrics && body && typeof body === 'object') {
-    body.timing_metrics = chatResult.timing_metrics;
+  const inFlightKey =
+    !ctx.isSimulation && ctx.clientMessageId && ctx.effectiveUserId && ctx.conversationId
+      ? buildIdempotencyMemoryKey(ctx.effectiveUserId, ctx.conversationId, String(ctx.clientMessageId))
+      : null;
+
+  if (inFlightKey && inFlightWidgetTurns.has(inFlightKey)) {
+    const sharedResult = await inFlightWidgetTurns.get(inFlightKey)!;
+    return {
+      ...sharedResult,
+      is_idempotent_retry: true,
+      deduplicated: true,
+    };
   }
 
-  return finalizeAndPersistWidgetTurn(ctx, chatResult);
+  const runTurn = async () => {
+    const chatResult = await processWebsiteChatMessage(ctx.chatRequest);
+    if (chatResult.timing_metrics && body && typeof body === 'object') {
+      body.timing_metrics = chatResult.timing_metrics;
+    }
+    return finalizeAndPersistWidgetTurn(ctx, chatResult);
+  };
+
+  if (!inFlightKey) {
+    return runTurn();
+  }
+
+  const turnPromise = runTurn();
+  inFlightWidgetTurns.set(inFlightKey, turnPromise);
+  try {
+    return await turnPromise;
+  } finally {
+    inFlightWidgetTurns.delete(inFlightKey);
+  }
 }
 
 export async function* handleWidgetChatStream(body: any, abortSignal?: AbortSignal): AsyncGenerator<any> {
@@ -1557,44 +1621,102 @@ export async function* handleWidgetChatStream(body: any, abortSignal?: AbortSign
     return;
   }
 
-  let finalMetadata: any = null;
-  let streamedReply = '';
+  const inFlightKey =
+    !ctx.isSimulation && ctx.clientMessageId && ctx.effectiveUserId && ctx.conversationId
+      ? buildIdempotencyMemoryKey(ctx.effectiveUserId, ctx.conversationId, String(ctx.clientMessageId))
+      : null;
 
-  for await (const s of processWebsiteChatMessageStream(ctx.chatRequest)) {
-    if (abortSignal?.aborted) {
-      return;
+  if (inFlightKey && inFlightWidgetTurns.has(inFlightKey)) {
+    const sharedResult = await inFlightWidgetTurns.get(inFlightKey)!;
+    if (sharedResult?.reply) {
+      yield { type: 'chunk', text: sharedResult.reply };
     }
-    if (s.chunk) {
-      streamedReply += s.chunk;
-      yield { type: 'chunk', text: s.chunk };
-    }
-    if (s.metadata) {
-      finalMetadata = s.metadata;
-    }
-  }
-
-  if (abortSignal?.aborted) {
+    yield {
+      type: 'metadata',
+      data: {
+        ...sharedResult,
+        is_idempotent_retry: true,
+        deduplicated: true,
+      },
+    };
     return;
   }
 
-  if (!finalMetadata) {
-    // Fallback if stream yielded no final metadata event
-    finalMetadata = {
-      reply: streamedReply,
-      conversation_id: ctx.conversationId,
-      is_sales_lead: false,
-      detected_intent: 'GENERAL_QUESTION',
-      inquiry_registered: false,
-      registration_attempted: false,
-      grounded_in_brain: false,
-    };
+  let resolveTurn!: (val: any) => void;
+  let rejectTurn!: (err: any) => void;
+  if (inFlightKey) {
+    const sharedPromise = new Promise<any>((res, rej) => {
+      resolveTurn = res;
+      rejectTurn = rej;
+    });
+    inFlightWidgetTurns.set(inFlightKey, sharedPromise);
   }
 
-  if (finalMetadata.timing_metrics && body && typeof body === 'object') {
-    body.timing_metrics = finalMetadata.timing_metrics;
-  }
+  let settled = false;
+  try {
+    let finalMetadata: any = null;
+    let streamedReply = '';
 
-  const finalized = await finalizeAndPersistWidgetTurn(ctx, finalMetadata);
-  yield { type: 'metadata', data: finalized };
+    for await (const s of processWebsiteChatMessageStream(ctx.chatRequest)) {
+      if (abortSignal?.aborted) {
+        if (inFlightKey && !settled) {
+          settled = true;
+          inFlightWidgetTurns.delete(inFlightKey);
+          rejectTurn(new Error('Stream aborted'));
+        }
+        return;
+      }
+      if (s.chunk) {
+        streamedReply += s.chunk;
+        yield { type: 'chunk', text: s.chunk };
+      }
+      if (s.metadata) {
+        finalMetadata = s.metadata;
+      }
+    }
+
+    if (abortSignal?.aborted) {
+      if (inFlightKey && !settled) {
+        settled = true;
+        inFlightWidgetTurns.delete(inFlightKey);
+        rejectTurn(new Error('Stream aborted'));
+      }
+      return;
+    }
+
+    if (!finalMetadata) {
+      // Fallback if stream yielded no final metadata event
+      finalMetadata = {
+        reply: streamedReply,
+        conversation_id: ctx.conversationId,
+        is_sales_lead: false,
+        detected_intent: 'GENERAL_QUESTION',
+        inquiry_registered: false,
+        registration_attempted: false,
+        grounded_in_brain: false,
+      };
+    }
+
+    if (finalMetadata.timing_metrics && body && typeof body === 'object') {
+      body.timing_metrics = finalMetadata.timing_metrics;
+    }
+
+    const finalized = await finalizeAndPersistWidgetTurn(ctx, finalMetadata);
+    if (inFlightKey && !settled) {
+      settled = true;
+      resolveTurn(finalized);
+    }
+    yield { type: 'metadata', data: finalized };
+  } catch (err) {
+    if (inFlightKey && !settled) {
+      settled = true;
+      rejectTurn(err);
+    }
+    throw err;
+  } finally {
+    if (inFlightKey) {
+      inFlightWidgetTurns.delete(inFlightKey);
+    }
+  }
 }
 

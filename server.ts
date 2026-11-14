@@ -44,7 +44,7 @@ import { getProviderCapabilities, getModelTelemetry, DEFAULT_MODEL_ROUTES } from
 import { approveAndSendEnquiryReply } from './src/server/enquiryWorkflowService.ts';
 import { buildPublicSummary, isReservedOfficialWidgetId, stripPrivateFieldsFromWidget } from './src/server/platformConfig.ts';
 import crypto from 'crypto';
-import { issueVisitorSessionToken, verifyVisitorSessionToken } from './src/server/visitorSessionService.ts';
+import { issueVisitorSessionToken, verifyVisitorSessionToken, isVisitorSessionSecretConfigured } from './src/server/visitorSessionService.ts';
 import { acceptHumanHandoff, sendHumanHandoffReply, returnControlToAlpha } from './src/server/durableHandoffService.ts';
 import dotenv from 'dotenv';
 
@@ -67,12 +67,9 @@ async function startServer() {
     await runNotificationWorker();
   }, 5 * 60 * 1000);
 
-  // Requirement 1: Startup warning for production secrets
-  if (process.env.NODE_ENV === 'production') {
-    const secret = process.env.VISITOR_SESSION_SECRET || process.env.SESSION_SECRET;
-    if (!secret || secret.trim().length < 32) {
-      console.warn('[SECURITY] WARNING: VISITOR_SESSION_SECRET is missing or < 32 chars. Using cryptographically random per-boot signing key.');
-    }
+  // Requirement 1: Startup check for production signing secret
+  if (process.env.NODE_ENV === 'production' && !isVisitorSessionSecretConfigured()) {
+    console.error('[SECURITY CRITICAL] VISITOR_SESSION_SECRET (or SESSION_SECRET) is missing or < 32 chars in production. Readiness check will fail closed (503) and visitor sessions will fail until configured.');
   }
 
   // Security: Apply robust production HTTP security headers
@@ -250,6 +247,14 @@ async function startServer() {
 
   app.get('/api/readiness', async (req, res) => {
     const time = new Date().toISOString();
+    if (process.env.NODE_ENV === 'production' && !isVisitorSessionSecretConfigured()) {
+      return res.status(503).json({
+        status: 'not_ready',
+        session_signing: 'misconfigured',
+        error: 'VISITOR_SESSION_SECRET (or SESSION_SECRET) must be set to at least 32 characters in production.',
+        time,
+      });
+    }
     if (!hasAdminCredentials()) {
       return res.status(503).json({
         status: 'not_ready',
@@ -271,6 +276,7 @@ async function startServer() {
     return res.json({
       status: 'ready',
       database: 'connected',
+      session_signing: isVisitorSessionSecretConfigured() ? 'configured' : 'dev_ephemeral',
       latencyMs: probe.latencyMs,
       time,
     });
@@ -376,8 +382,30 @@ async function startServer() {
     }
   });
 
+  const serveChatWidgetJs = (req: express.Request, res: express.Response) => {
+    setPublicWidgetCors(res);
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+
+    const candidatePaths = [
+      path.join(__dirname, 'public', 'chat-widget.js'),
+      path.join(__dirname, 'dist', 'chat-widget.js'),
+      path.join(process.cwd(), 'public', 'chat-widget.js'),
+      path.join(process.cwd(), 'dist', 'chat-widget.js'),
+    ];
+
+    for (const p of candidatePaths) {
+      if (fs.existsSync(p)) {
+        const fileContent = fs.readFileSync(p, 'utf8');
+        return res.status(200).send(fileContent);
+      }
+    }
+
+    return serveWidgetJs(req, res);
+  };
+
   app.get('/widget.js', serveWidgetJs);
-  app.get('/chat-widget.js', serveWidgetJs);
+  app.get('/chat-widget.js', serveChatWidgetJs);
 
   // Issue or refresh a scoped visitor-session token
   app.post('/api/widget/session', async (req, res) => {
@@ -699,9 +727,11 @@ async function startServer() {
         trackVisitorSession({
           visitorId,
           widgetId: config.widget_id,
+          tenantId: config.user_id,
           companyName: config.business_name,
           userAgent: req.headers['user-agent'],
           action: 'LOAD',
+          analyticsConsented: true,
         });
       }
 
@@ -1435,22 +1465,40 @@ async function startServer() {
       const analyticsConsent = req.headers['x-consent-analytics'] === '1';
 
       if (stream) {
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Accel-Buffering', 'no');
+        res.flushHeaders?.();
+        res.write(': connected\n\n');
 
         const ac = new AbortController();
-        req.on('close', () => ac.abort());
+        res.on('close', () => {
+          if (!res.writableEnded) {
+            ac.abort();
+          }
+        });
 
         let lastMetadata: any = null;
 
-        for await (const event of handleWidgetChatStream(chatPayload, ac.signal)) {
-          if (ac.signal.aborted || res.writableEnded) break;
-          if (event.type === 'metadata' && event.data) {
-            lastMetadata = event.data;
+        try {
+          for await (const event of handleWidgetChatStream(chatPayload, ac.signal)) {
+            if (ac.signal.aborted || res.writableEnded) break;
+            if (event.type === 'metadata' && event.data) {
+              lastMetadata = event.data;
+            }
+            res.write(`data: ${JSON.stringify(event)}\n\n`);
           }
-          res.write(`data: ${JSON.stringify(event)}\n\n`);
+        } catch (streamErr: any) {
+          console.error('[SSE] Widget stream error:', streamErr?.message || streamErr);
+          if (!res.writableEnded && !ac.signal.aborted) {
+            res.write(
+              `data: ${JSON.stringify({
+                type: 'error',
+                error: streamErr?.message || 'Streaming response failed.',
+              })}\n\n`
+            );
+          }
         }
 
         const latency = Date.now() - chatStart;

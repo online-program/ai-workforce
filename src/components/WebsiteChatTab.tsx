@@ -57,7 +57,8 @@ export const WebsiteChatTab: React.FC<WebsiteChatTabProps> = ({
     user_id: userId || '',
     business_name: companyProfile.name || 'My Business',
     welcome_message: generateAlphaVisitorGreeting(companyProfile),
-    theme_color: '#000000',
+    theme_color: '#0F172A',
+    themeMode: 'light',
     position: 'bottom-right',
     design_style: 'attractive_3d',
     is_active: true,
@@ -78,6 +79,7 @@ export const WebsiteChatTab: React.FC<WebsiteChatTabProps> = ({
             ...saved,
             welcome_message: generateAlphaVisitorGreeting(companyProfile, saved.welcome_message),
             design_style: saved.design_style || 'attractive_3d',
+            themeMode: saved.themeMode || 'light',
           };
           setSavedConfig(merged);
           setDraftConfig(merged);
@@ -87,7 +89,8 @@ export const WebsiteChatTab: React.FC<WebsiteChatTabProps> = ({
             user_id: targetUserId,
             business_name: companyProfile.name || 'My Business',
             welcome_message: generateAlphaVisitorGreeting(companyProfile),
-            theme_color: '#000000',
+            theme_color: '#0F172A',
+            themeMode: 'light',
             position: 'bottom-right',
             design_style: 'attractive_3d',
             is_active: true,

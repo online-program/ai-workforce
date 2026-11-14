@@ -1,6 +1,7 @@
 import {
   WidgetStudioConfig,
   WidgetVisualMode,
+  WidgetThemeMode,
   WidgetLauncherType,
   WidgetLauncherSize,
   WidgetLauncherShape,
@@ -12,20 +13,69 @@ import {
 } from '../types.ts';
 
 // -------------------------------------------------------------
-// 1. Contrast & Color Utilities (WCAG 2.1 AA Compliance)
+// 1. Color Parsing, Sanitization & Contrast (WCAG 2.1 AA)
 // -------------------------------------------------------------
+
+const HEX_COLOR_REGEX = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+const RGB_COLOR_REGEX = /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(\s*,\s*(0|1|0?\.\d+))?\s*\)$/i;
+
+export function sanitizeCssColor(value: unknown, fallback: string): string {
+  if (typeof value !== 'string') return fallback;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 64) return fallback;
+  if (/[;<>{}()\\]|url\s*\(|expression\s*\(|javascript:/i.test(trimmed)) {
+    return fallback;
+  }
+  if (HEX_COLOR_REGEX.test(trimmed)) {
+    return trimmed;
+  }
+  if (RGB_COLOR_REGEX.test(trimmed)) {
+    return trimmed;
+  }
+  return fallback;
+}
+
+export function sanitizeSafeUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 2048) return undefined;
+  if (trimmed.startsWith('/')) {
+    return /^\/[^/\\]/.test(trimmed) ? trimmed : undefined;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+      return parsed.toString();
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export function parseHexColor(hex: string): { r: number; g: number; b: number } | null {
   if (!hex || typeof hex !== 'string') return null;
-  const clean = hex.replace('#', '').trim();
-  if (clean.length === 3) {
+  const trimmed = hex.trim();
+  if (trimmed.startsWith('rgb')) {
+    const match = trimmed.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+    if (match) {
+      return {
+        r: Math.min(255, Math.max(0, parseInt(match[1], 10))),
+        g: Math.min(255, Math.max(0, parseInt(match[2], 10))),
+        b: Math.min(255, Math.max(0, parseInt(match[3], 10))),
+      };
+    }
+    return null;
+  }
+  const clean = trimmed.replace('#', '');
+  if (clean.length === 3 && /^[0-9a-f]{3}$/i.test(clean)) {
     return {
       r: parseInt(clean[0] + clean[0], 16),
       g: parseInt(clean[1] + clean[1], 16),
       b: parseInt(clean[2] + clean[2], 16),
     };
   }
-  if (clean.length === 6) {
+  if ((clean.length === 6 || clean.length === 8) && /^[0-9a-f]+$/i.test(clean)) {
     return {
       r: parseInt(clean.substring(0, 2), 16),
       g: parseInt(clean.substring(2, 4), 16),
@@ -56,12 +106,24 @@ export function getContrastRatio(foregroundHex: string, backgroundHex: string): 
 }
 
 /**
- * Ensures text is clearly legible on any background.
- * Returns #ffffff if background is dark, and #0f172a if background is light.
+ * Guarantees WCAG 2.1 AA contrast on any background color.
+ * Picks whichever of #FFFFFF or #0F172A achieves higher contrast ratio.
  */
 export function getReadableTextColor(backgroundHex: string): string {
-  const lum = getLuminance(backgroundHex);
-  return lum > 0.42 ? '#0f172a' : '#ffffff';
+  const whiteContrast = getContrastRatio('#ffffff', backgroundHex);
+  const slateContrast = getContrastRatio('#0f172a', backgroundHex);
+  return slateContrast >= whiteContrast ? '#0f172a' : '#ffffff';
+}
+
+export function ensureAccessibleForeground(preferredFg: string | undefined, backgroundHex: string, minRatio = 4.5): string {
+  const cleanBg = sanitizeCssColor(backgroundHex, '#ffffff');
+  if (preferredFg) {
+    const cleanFg = sanitizeCssColor(preferredFg, '');
+    if (cleanFg && getContrastRatio(cleanFg, cleanBg) >= minRatio) {
+      return cleanFg;
+    }
+  }
+  return getReadableTextColor(cleanBg);
 }
 
 export interface ContrastAudit {
@@ -82,7 +144,7 @@ export function auditContrast(foregroundHex: string, backgroundHex: string): Con
 }
 
 // -------------------------------------------------------------
-// 2. Official Design Presets
+// 2. Official Design Presets (Clean Apple x ChatGPT Commercial Aesthetics)
 // -------------------------------------------------------------
 
 export interface WidgetPresetItem {
@@ -98,27 +160,28 @@ export interface WidgetPresetItem {
 export const PROFESSIONAL_PRESETS: WidgetPresetItem[] = [
   {
     id: 'clean',
-    name: 'Clean',
+    name: 'Studio Light',
     category: 'professional',
-    tagline: 'Modern High-Trust SaaS',
-    description: 'Crisp borders, balanced contrast, and subtle depth for serious SaaS & corporate portals.',
-    previewColors: ['#0f172a', '#ffffff', '#475569'],
+    tagline: 'Crisp Apple × ChatGPT Light Surface',
+    description: 'High-clarity light canvas, subtle slate borders, and deep navy ink for effortless B2B reading.',
+    previewColors: ['#0F172A', '#FFFFFF', '#F1F5F9'],
     config: {
       mode: 'simple',
+      themeMode: 'light',
       launcherType: 'chat_bubble',
-      primaryColor: '#0f172a',
-      secondaryColor: '#475569',
-      backgroundColor: '#ffffff',
-      textColor: '#0f172a',
-      aiMessageColor: '#f1f5f9',
-      aiMessageTextColor: '#0f172a',
-      userMessageColor: '#0f172a',
-      userMessageTextColor: '#ffffff',
+      primaryColor: '#0F172A',
+      secondaryColor: '#2563EB',
+      backgroundColor: '#FFFFFF',
+      textColor: '#0F172A',
+      aiMessageColor: '#F1F5F9',
+      aiMessageTextColor: '#0F172A',
+      userMessageColor: '#0F172A',
+      userMessageTextColor: '#FFFFFF',
       gradientEnabled: false,
       gradientType: 'none',
       launcherSize: 'medium',
       launcherShape: 'circle',
-      borderRadius: 16,
+      borderRadius: 18,
       shadowIntensity: 'soft',
       glowIntensity: 'none',
       animationIntensity: 'subtle',
@@ -127,59 +190,58 @@ export const PROFESSIONAL_PRESETS: WidgetPresetItem[] = [
   },
   {
     id: 'minimal',
-    name: 'Minimal',
+    name: 'Minimal Zinc',
     category: 'professional',
     tagline: 'Understated Architectural',
-    description: 'Understated monochrome design focusing purely on clean typography and fast interactions.',
-    previewColors: ['#18181b', '#fafafa', '#71717a'],
+    description: 'Neutral paper surface and balanced zinc accents prioritizing typographic clarity.',
+    previewColors: ['#18181B', '#FAFAFA', '#F4F4F5'],
     config: {
       mode: 'simple',
+      themeMode: 'light',
       launcherType: 'ai_spark',
-      primaryColor: '#18181b',
-      secondaryColor: '#71717a',
-      backgroundColor: '#fafafa',
-      textColor: '#18181b',
-      aiMessageColor: '#f4f4f5',
-      aiMessageTextColor: '#18181b',
-      userMessageColor: '#18181b',
-      userMessageTextColor: '#ffffff',
+      primaryColor: '#18181B',
+      secondaryColor: '#52525B',
+      backgroundColor: '#FAFAFA',
+      textColor: '#18181B',
+      aiMessageColor: '#F4F4F5',
+      aiMessageTextColor: '#18181B',
+      userMessageColor: '#18181B',
+      userMessageTextColor: '#FFFFFF',
       gradientEnabled: false,
       gradientType: 'none',
-      launcherSize: 'small',
+      launcherSize: 'medium',
       launcherShape: 'squircle',
-      borderRadius: 12,
-      shadowIntensity: 'none',
+      borderRadius: 16,
+      shadowIntensity: 'soft',
       glowIntensity: 'none',
-      animationIntensity: 'none',
+      animationIntensity: 'subtle',
       launcherPosition: 'bottom-right',
     },
   },
   {
     id: 'executive',
-    name: 'Executive',
+    name: 'Executive Slate',
     category: 'professional',
     tagline: 'Enterprise B2B & Advisory',
-    description: 'Subtle slate gradients with authoritative presence for commercial services and agencies.',
-    previewColors: ['#1e293b', '#0f172a', '#ffffff'],
+    description: 'Refined indigo-slate accent with crisp white surface for commercial advisory teams.',
+    previewColors: ['#1E293B', '#3B82F6', '#FFFFFF'],
     config: {
       mode: 'simple',
+      themeMode: 'light',
       launcherType: 'ai_workforce',
-      primaryColor: '#1e293b',
-      secondaryColor: '#334155',
-      backgroundColor: '#ffffff',
-      textColor: '#0f172a',
-      aiMessageColor: '#f8fafc',
-      aiMessageTextColor: '#0f172a',
-      userMessageColor: '#1e293b',
-      userMessageTextColor: '#ffffff',
-      gradientEnabled: true,
-      gradientType: 'subtle',
-      gradientColor1: '#1e293b',
-      gradientColor2: '#0f172a',
-      gradientAngle: 135,
+      primaryColor: '#1E293B',
+      secondaryColor: '#3B82F6',
+      backgroundColor: '#FFFFFF',
+      textColor: '#0F172A',
+      aiMessageColor: '#F8FAFC',
+      aiMessageTextColor: '#0F172A',
+      userMessageColor: '#1E293B',
+      userMessageTextColor: '#FFFFFF',
+      gradientEnabled: false,
+      gradientType: 'none',
       launcherSize: 'medium',
       launcherShape: 'rounded_square',
-      borderRadius: 16,
+      borderRadius: 18,
       shadowIntensity: 'medium',
       glowIntensity: 'none',
       animationIntensity: 'subtle',
@@ -190,32 +252,33 @@ export const PROFESSIONAL_PRESETS: WidgetPresetItem[] = [
 
 export const ATTRACTIVE_3D_PRESETS: WidgetPresetItem[] = [
   {
-    id: 'alpha_gold',
-    name: 'Alpha Gold',
+    id: 'obsidian_slate',
+    name: 'Midnight Graphite',
     category: 'attractive_3d',
-    tagline: 'Signature Luxury Black & Radiant Gold',
-    description: 'Signature AI Workforce styling: deep obsidian black canvas with radiant #FFD000 gold accents and subtle luminous halo.',
-    previewColors: ['#080808', '#FFD000', '#FFE36A'],
+    tagline: 'Refined Dark Mode Canvas',
+    description: 'Soft dark slate surfaces, indigo accent focus states, and balanced contrast for dark websites.',
+    previewColors: ['#0F172A', '#3B82F6', '#F8FAFC'],
     config: {
       mode: 'attractive_3d',
+      themeMode: 'dark',
       launcherType: 'ai_workforce',
-      primaryColor: '#080808',
-      secondaryColor: '#FFD000',
-      backgroundColor: '#111111',
-      textColor: '#FFFFFF',
-      aiMessageColor: '#171717',
-      aiMessageTextColor: '#FFFFFF',
-      userMessageColor: '#FFD000',
-      userMessageTextColor: '#080808',
+      primaryColor: '#3B82F6',
+      secondaryColor: '#60A5FA',
+      backgroundColor: '#0F172A',
+      textColor: '#F8FAFC',
+      aiMessageColor: '#1E293B',
+      aiMessageTextColor: '#F8FAFC',
+      userMessageColor: '#2563EB',
+      userMessageTextColor: '#FFFFFF',
       gradientEnabled: true,
-      gradientType: 'custom',
-      gradientColor1: '#080808',
-      gradientColor2: '#171717',
+      gradientType: 'subtle',
+      gradientColor1: '#1E293B',
+      gradientColor2: '#0F172A',
       gradientAngle: 135,
       launcherSize: 'medium',
       launcherShape: 'circle',
       borderRadius: 20,
-      shadowIntensity: 'deep',
+      shadowIntensity: 'medium',
       glowIntensity: 'subtle',
       animationIntensity: 'subtle',
       launcherPosition: 'bottom-right',
@@ -223,31 +286,32 @@ export const ATTRACTIVE_3D_PRESETS: WidgetPresetItem[] = [
   },
   {
     id: 'glass',
-    name: 'Glass',
+    name: 'Sapphire Glass',
     category: 'attractive_3d',
-    tagline: 'Dimensional Glassmorphism',
-    description: 'Translucent frosted glass with soft glowing ambient reflections and dimensional depth.',
-    previewColors: ['#2563eb', '#60a5fa', '#ffffff'],
+    tagline: 'Dimensional Clarity',
+    description: 'Clean cobalt-blue accents paired with an airy white message viewport and soft shadows.',
+    previewColors: ['#2563EB', '#EFF6FF', '#FFFFFF'],
     config: {
       mode: 'attractive_3d',
+      themeMode: 'light',
       launcherType: 'ai_spark',
-      primaryColor: '#2563eb',
-      secondaryColor: '#60a5fa',
-      backgroundColor: '#ffffff',
-      textColor: '#0f172a',
-      aiMessageColor: '#eff6ff',
-      aiMessageTextColor: '#1e3a8a',
-      userMessageColor: '#2563eb',
-      userMessageTextColor: '#ffffff',
+      primaryColor: '#2563EB',
+      secondaryColor: '#3B82F6',
+      backgroundColor: '#FFFFFF',
+      textColor: '#0F172A',
+      aiMessageColor: '#EFF6FF',
+      aiMessageTextColor: '#1E3A8A',
+      userMessageColor: '#2563EB',
+      userMessageTextColor: '#FFFFFF',
       gradientEnabled: true,
-      gradientType: 'custom',
-      gradientColor1: '#2563eb',
-      gradientColor2: '#3b82f6',
+      gradientType: 'subtle',
+      gradientColor1: '#2563EB',
+      gradientColor2: '#1D4ED8',
       gradientAngle: 135,
       launcherSize: 'medium',
       launcherShape: 'circle',
       borderRadius: 20,
-      shadowIntensity: 'deep',
+      shadowIntensity: 'medium',
       glowIntensity: 'subtle',
       animationIntensity: 'subtle',
       launcherPosition: 'bottom-right',
@@ -255,33 +319,64 @@ export const ATTRACTIVE_3D_PRESETS: WidgetPresetItem[] = [
   },
   {
     id: 'aurora',
-    name: 'Aurora',
+    name: 'Indigo Studio',
     category: 'attractive_3d',
-    tagline: 'Vibrant Gen-Z & Creators',
-    description: 'Dynamic gradient flow with layered glow accents and expressive spring animations.',
-    previewColors: ['#6366f1', '#a855f7', '#ec4899'],
+    tagline: 'Modern Product & Creator',
+    description: 'Crisp indigo accents with warm readability and polished spring interactions.',
+    previewColors: ['#4F46E5', '#EEF2FF', '#FFFFFF'],
     config: {
       mode: 'attractive_3d',
+      themeMode: 'light',
       launcherType: 'ai_spark',
-      primaryColor: '#6366f1',
-      secondaryColor: '#ec4899',
-      backgroundColor: '#ffffff',
-      textColor: '#0f172a',
-      aiMessageColor: '#f5f3ff',
-      aiMessageTextColor: '#312e81',
-      userMessageColor: '#6366f1',
-      userMessageTextColor: '#ffffff',
+      primaryColor: '#4F46E5',
+      secondaryColor: '#6366F1',
+      backgroundColor: '#FFFFFF',
+      textColor: '#0F172A',
+      aiMessageColor: '#F5F3FF',
+      aiMessageTextColor: '#1E1B4B',
+      userMessageColor: '#4F46E5',
+      userMessageTextColor: '#FFFFFF',
       gradientEnabled: true,
-      gradientType: 'custom',
-      gradientColor1: '#6366f1',
-      gradientColor2: '#a855f7',
-      gradientAngle: 120,
-      launcherSize: 'large',
+      gradientType: 'subtle',
+      gradientColor1: '#4F46E5',
+      gradientColor2: '#6366F1',
+      gradientAngle: 135,
+      launcherSize: 'medium',
       launcherShape: 'squircle',
-      borderRadius: 24,
-      shadowIntensity: 'dramatic',
-      glowIntensity: 'vibrant',
-      animationIntensity: 'expressive',
+      borderRadius: 20,
+      shadowIntensity: 'medium',
+      glowIntensity: 'subtle',
+      animationIntensity: 'subtle',
+      launcherPosition: 'bottom-right',
+    },
+  },
+  {
+    id: 'alpha_gold',
+    name: 'Obsidian Classic',
+    category: 'attractive_3d',
+    tagline: 'Editorial Monochrome Dark',
+    description: 'Clean charcoal canvas with pure white user contrast bubbles and understated chrome.',
+    previewColors: ['#111827', '#1F2937', '#F9FAFB'],
+    config: {
+      mode: 'attractive_3d',
+      themeMode: 'dark',
+      launcherType: 'ai_workforce',
+      primaryColor: '#18181B',
+      secondaryColor: '#3F3F46',
+      backgroundColor: '#09090B',
+      textColor: '#F4F4F5',
+      aiMessageColor: '#18181B',
+      aiMessageTextColor: '#F4F4F5',
+      userMessageColor: '#F4F4F5',
+      userMessageTextColor: '#09090B',
+      gradientEnabled: false,
+      gradientType: 'none',
+      launcherSize: 'medium',
+      launcherShape: 'circle',
+      borderRadius: 20,
+      shadowIntensity: 'deep',
+      glowIntensity: 'none',
+      animationIntensity: 'subtle',
       launcherPosition: 'bottom-right',
     },
   },
@@ -289,31 +384,32 @@ export const ATTRACTIVE_3D_PRESETS: WidgetPresetItem[] = [
     id: 'deep_space',
     name: 'Deep Space',
     category: 'attractive_3d',
-    tagline: 'Dark Luxury & High-Tech',
-    description: 'Deep cosmic canvas with luminous neon edge lighting and dimensional holographic depth.',
-    previewColors: ['#090d16', '#1e1b4b', '#3b82f6'],
+    tagline: 'Dark High-Tech',
+    description: 'Deep slate night canvas with vibrant cobalt accent pills.',
+    previewColors: ['#090D16', '#1E1B4B', '#3B82F6'],
     config: {
       mode: 'attractive_3d',
+      themeMode: 'dark',
       launcherType: 'ai_workforce',
-      primaryColor: '#090d16',
-      secondaryColor: '#1e293b',
-      backgroundColor: '#0b0f19',
-      textColor: '#f8fafc',
-      aiMessageColor: '#141c2e',
-      aiMessageTextColor: '#e2e8f0',
-      userMessageColor: '#3b82f6',
-      userMessageTextColor: '#ffffff',
+      primaryColor: '#1D4ED8',
+      secondaryColor: '#3B82F6',
+      backgroundColor: '#0B0F19',
+      textColor: '#F8FAFC',
+      aiMessageColor: '#141C2E',
+      aiMessageTextColor: '#E2E8F0',
+      userMessageColor: '#2563EB',
+      userMessageTextColor: '#FFFFFF',
       gradientEnabled: true,
-      gradientType: 'custom',
-      gradientColor1: '#090d16',
-      gradientColor2: '#1e1b4b',
+      gradientType: 'subtle',
+      gradientColor1: '#1E293B',
+      gradientColor2: '#0F172A',
       gradientAngle: 145,
       launcherSize: 'medium',
       launcherShape: 'circle',
       borderRadius: 20,
-      shadowIntensity: 'dramatic',
-      glowIntensity: 'vibrant',
-      animationIntensity: 'expressive',
+      shadowIntensity: 'deep',
+      glowIntensity: 'subtle',
+      animationIntensity: 'subtle',
       launcherPosition: 'bottom-right',
     },
   },
@@ -322,33 +418,43 @@ export const ATTRACTIVE_3D_PRESETS: WidgetPresetItem[] = [
 export const ALL_PRESETS = [...PROFESSIONAL_PRESETS, ...ATTRACTIVE_3D_PRESETS];
 
 // -------------------------------------------------------------
-// 3. Default Configuration & Sanitation
+// 3. Default Configuration & Sanitation (Neutral, Crisp Light Default)
 // -------------------------------------------------------------
 
 export const DEFAULT_WIDGET_STUDIO_CONFIG: WidgetStudioConfig = {
   mode: 'attractive_3d',
+  themeMode: 'light',
   launcherType: 'ai_workforce',
-  primaryColor: '#080808',
-  secondaryColor: '#FFD000',
-  backgroundColor: '#111111',
-  textColor: '#FFFFFF',
-  aiMessageColor: '#171717',
-  aiMessageTextColor: '#FFFFFF',
-  userMessageColor: '#FFD000',
-  userMessageTextColor: '#080808',
-  gradientEnabled: true,
-  gradientType: 'custom',
-  gradientColor1: '#080808',
-  gradientColor2: '#171717',
+  primaryColor: '#0F172A',
+  secondaryColor: '#2563EB',
+  backgroundColor: '#FFFFFF',
+  textColor: '#0F172A',
+  aiMessageColor: '#F1F5F9',
+  aiMessageTextColor: '#0F172A',
+  userMessageColor: '#0F172A',
+  userMessageTextColor: '#FFFFFF',
+  gradientEnabled: false,
+  gradientType: 'none',
+  gradientColor1: '#0F172A',
+  gradientColor2: '#1E293B',
   gradientAngle: 135,
   launcherSize: 'medium',
   launcherShape: 'circle',
   borderRadius: 20,
-  shadowIntensity: 'deep',
-  glowIntensity: 'subtle',
+  shadowIntensity: 'medium',
+  glowIntensity: 'none',
   animationIntensity: 'subtle',
   launcherPosition: 'bottom-right',
 };
+
+export function resolveEffectiveThemeMode(
+  themeMode?: WidgetThemeMode,
+  prefersDark = false
+): 'light' | 'dark' {
+  if (themeMode === 'dark') return 'dark';
+  if (themeMode === 'system') return prefersDark ? 'dark' : 'light';
+  return 'light';
+}
 
 export function sanitizeWidgetStudioConfig(
   raw: any,
@@ -356,6 +462,13 @@ export function sanitizeWidgetStudioConfig(
 ): WidgetStudioConfig {
   const mode: WidgetVisualMode =
     raw?.mode === 'simple' || raw?.design_style === 'simple' ? 'simple' : 'attractive_3d';
+
+  const validThemeModes: WidgetThemeMode[] = ['light', 'dark', 'system'];
+  const inferredThemeMode: WidgetThemeMode = validThemeModes.includes(raw?.themeMode)
+    ? raw.themeMode
+    : raw?.backgroundColor && getLuminance(sanitizeCssColor(raw.backgroundColor, '#ffffff')) < 0.25
+    ? 'dark'
+    : 'light';
 
   const validLaunchers: WidgetLauncherType[] = ['ai_spark', 'chat_bubble', 'custom_logo', 'ai_workforce'];
   const launcherType: WidgetLauncherType = validLaunchers.includes(raw?.launcherType)
@@ -379,23 +492,21 @@ export function sanitizeWidgetStudioConfig(
     ? 'subtle'
     : 'none';
 
-  const validShadows: WidgetShadowIntensity[] = ['none', 'soft', 'medium', 'deep', 'dramatic'];
+  const validShadows: WidgetShadowIntensity[] = ['none', 'soft', 'medium', 'deep', 'dramatic', 'strong'];
   const shadowIntensity: WidgetShadowIntensity = validShadows.includes(raw?.shadowIntensity)
     ? raw.shadowIntensity
     : mode === 'simple'
     ? 'soft'
     : 'medium';
 
-  const validGlows: WidgetGlowIntensity[] = ['none', 'subtle', 'vibrant'];
+  const validGlows: WidgetGlowIntensity[] = ['none', 'subtle', 'soft', 'vibrant', 'medium', 'strong'];
   const glowIntensity: WidgetGlowIntensity = validGlows.includes(raw?.glowIntensity)
     ? raw.glowIntensity
     : 'none';
 
-  const validAnimations: WidgetAnimationIntensity[] = ['none', 'subtle', 'expressive'];
+  const validAnimations: WidgetAnimationIntensity[] = ['none', 'subtle', 'playful', 'expressive'];
   const animationIntensity: WidgetAnimationIntensity = validAnimations.includes(raw?.animationIntensity)
     ? raw.animationIntensity
-    : mode === 'simple'
-    ? 'subtle'
     : 'subtle';
 
   const launcherPosition: WidgetPosition =
@@ -403,18 +514,27 @@ export function sanitizeWidgetStudioConfig(
       ? 'bottom-left'
       : 'bottom-right';
 
-  const primaryColor = raw?.primaryColor || raw?.theme_color || fallbackThemeColor || '#0f172a';
-  const secondaryColor = raw?.secondaryColor || '#475569';
-  const backgroundColor = raw?.backgroundColor || '#ffffff';
-  const textColor = raw?.textColor || getReadableTextColor(backgroundColor);
+  const isDarkDefault = inferredThemeMode === 'dark';
 
-  const rawAiMsgBg = raw?.aiMessageColor || (mode === 'simple' ? '#f8fafc' : '#f1f5f9');
-  const aiMessageColor = rawAiMsgBg;
-  const aiMessageTextColor = raw?.aiMessageTextColor || getReadableTextColor(aiMessageColor);
+  const primaryColor = sanitizeCssColor(
+    raw?.primaryColor || raw?.theme_color || fallbackThemeColor,
+    DEFAULT_WIDGET_STUDIO_CONFIG.primaryColor
+  );
+  const secondaryColor = sanitizeCssColor(raw?.secondaryColor, '#2563EB');
+  const backgroundColor = sanitizeCssColor(
+    raw?.backgroundColor,
+    isDarkDefault ? '#0F172A' : '#FFFFFF'
+  );
+  const textColor = ensureAccessibleForeground(raw?.textColor, backgroundColor, 4.5);
 
-  const rawUserMsgBg = raw?.userMessageColor || primaryColor;
-  const userMessageColor = rawUserMsgBg;
-  const userMessageTextColor = raw?.userMessageTextColor || getReadableTextColor(userMessageColor);
+  const aiMessageColor = sanitizeCssColor(
+    raw?.aiMessageColor,
+    isDarkDefault ? '#1E293B' : '#F1F5F9'
+  );
+  const aiMessageTextColor = ensureAccessibleForeground(raw?.aiMessageTextColor, aiMessageColor, 4.5);
+
+  const userMessageColor = sanitizeCssColor(raw?.userMessageColor, primaryColor);
+  const userMessageTextColor = ensureAccessibleForeground(raw?.userMessageTextColor, userMessageColor, 4.5);
 
   const rawRadius = typeof raw?.borderRadius === 'number' ? raw.borderRadius : mode === 'simple' ? 16 : 20;
   const borderRadius = Math.max(8, Math.min(28, rawRadius));
@@ -422,10 +542,14 @@ export function sanitizeWidgetStudioConfig(
   const gradientAngle =
     typeof raw?.gradientAngle === 'number' ? Math.max(0, Math.min(360, raw.gradientAngle)) : 135;
 
+  const gradientColor1 = sanitizeCssColor(raw?.gradientColor1, primaryColor);
+  const gradientColor2 = sanitizeCssColor(raw?.gradientColor2, secondaryColor);
+
   return {
     mode,
+    themeMode: inferredThemeMode,
     launcherType,
-    logoUrl: typeof raw?.logoUrl === 'string' && raw.logoUrl.trim() ? raw.logoUrl.trim() : undefined,
+    logoUrl: sanitizeSafeUrl(raw?.logoUrl),
     primaryColor,
     secondaryColor,
     backgroundColor,
@@ -434,10 +558,10 @@ export function sanitizeWidgetStudioConfig(
     aiMessageTextColor,
     userMessageColor,
     userMessageTextColor,
-    gradientEnabled: Boolean(raw?.gradientEnabled || gradientType !== 'none'),
+    gradientEnabled: Boolean(raw?.gradientEnabled && gradientType !== 'none'),
     gradientType,
-    gradientColor1: raw?.gradientColor1 || primaryColor,
-    gradientColor2: raw?.gradientColor2 || secondaryColor,
+    gradientColor1,
+    gradientColor2,
     gradientAngle,
     launcherSize,
     launcherShape,
@@ -446,6 +570,125 @@ export function sanitizeWidgetStudioConfig(
     glowIntensity,
     animationIntensity,
     launcherPosition,
+  };
+}
+
+export interface WidgetThemeTokens {
+  effectiveMode: 'light' | 'dark';
+  surfaceBg: string;
+  headerBg: string;
+  headerText: string;
+  headerSubtext: string;
+  headerHoverBg: string;
+  headerBorder: string;
+  viewportBg: string;
+  aiBubbleBg: string;
+  aiBubbleText: string;
+  aiBubbleBorder: string;
+  userBubbleBg: string;
+  userBubbleText: string;
+  composerBg: string;
+  composerBorder: string;
+  inputBg: string;
+  inputText: string;
+  inputPlaceholder: string;
+  inputBorder: string;
+  inputFocusBorder: string;
+  sendBtnBg: string;
+  sendBtnText: string;
+  chipBg: string;
+  chipHoverBg: string;
+  chipText: string;
+  chipBorder: string;
+  bannerBg: string;
+  bannerText: string;
+  bannerBorder: string;
+  timestampText: string;
+  footerBg: string;
+  footerText: string;
+  footerBorder: string;
+  accentColor: string;
+}
+
+export function resolveWidgetThemeTokens(
+  config: Partial<WidgetStudioConfig>,
+  prefersDark = false
+): WidgetThemeTokens {
+  const effectiveMode = resolveEffectiveThemeMode(config.themeMode, prefersDark);
+  const explicitLightOverride =
+    config.themeMode === 'light' ||
+    (config.themeMode !== 'dark' &&
+      config.backgroundColor &&
+      getLuminance(sanitizeCssColor(config.backgroundColor, '#FFFFFF')) > 0.45);
+  const darkSurface = effectiveMode === 'dark' || (!explicitLightOverride && getLuminance(sanitizeCssColor(config.backgroundColor, '#FFFFFF')) < 0.25);
+
+  const primary = sanitizeCssColor(config.primaryColor, '#0F172A');
+  const accent = sanitizeCssColor(config.secondaryColor, '#2563EB');
+
+  const surfaceBg = darkSurface
+    ? sanitizeCssColor(config.backgroundColor && getLuminance(config.backgroundColor) < 0.25 ? config.backgroundColor : '#0F172A', '#0F172A')
+    : sanitizeCssColor(config.backgroundColor && getLuminance(config.backgroundColor) >= 0.45 ? config.backgroundColor : '#FFFFFF', '#FFFFFF');
+
+  const viewportBg = darkSurface ? '#0B1120' : '#F8FAFC';
+
+  const headerBg = darkSurface
+    ? (getLuminance(primary) < 0.25 ? primary : '#0F172A')
+    : primary;
+  const headerIsLight = getLuminance(headerBg) > 0.42;
+  const headerText = getReadableTextColor(headerBg);
+  const headerSubtext = headerIsLight ? '#475569' : '#CBD5E1';
+  const headerHoverBg = headerIsLight ? 'rgba(15, 23, 42, 0.08)' : 'rgba(255, 255, 255, 0.14)';
+  const headerBorder = headerIsLight ? 'rgba(15, 23, 42, 0.08)' : 'rgba(255, 255, 255, 0.12)';
+
+  const aiBubbleBg = darkSurface
+    ? sanitizeCssColor(config.aiMessageColor && getLuminance(config.aiMessageColor) < 0.25 ? config.aiMessageColor : '#1E293B', '#1E293B')
+    : sanitizeCssColor(config.aiMessageColor && getLuminance(config.aiMessageColor) >= 0.45 ? config.aiMessageColor : '#FFFFFF', '#FFFFFF');
+  const aiBubbleText = ensureAccessibleForeground(config.aiMessageTextColor, aiBubbleBg, 4.5);
+  const aiBubbleBorder = darkSurface ? 'rgba(148, 163, 184, 0.16)' : '#E2E8F0';
+
+  const userBubbleBg = sanitizeCssColor(config.userMessageColor, primary);
+  const userBubbleText = ensureAccessibleForeground(config.userMessageTextColor, userBubbleBg, 4.5);
+
+  // Send button prioritizes crisp legible fill with >=4.5:1 foreground contrast
+  const sendBtnBg =
+    getLuminance(primary) > 0.72 ? (darkSurface ? '#3B82F6' : '#0F172A') : primary;
+  const sendBtnText = getReadableTextColor(sendBtnBg);
+
+  return {
+    effectiveMode: darkSurface ? 'dark' : 'light',
+    surfaceBg,
+    headerBg,
+    headerText,
+    headerSubtext,
+    headerHoverBg,
+    headerBorder,
+    viewportBg,
+    aiBubbleBg,
+    aiBubbleText,
+    aiBubbleBorder,
+    userBubbleBg,
+    userBubbleText,
+    composerBg: darkSurface ? '#0F172A' : '#FFFFFF',
+    composerBorder: darkSurface ? 'rgba(148, 163, 184, 0.16)' : '#E2E8F0',
+    inputBg: darkSurface ? '#1E293B' : '#F1F5F9',
+    inputText: darkSurface ? '#F8FAFC' : '#0F172A',
+    inputPlaceholder: darkSurface ? '#94A3B8' : '#64748B',
+    inputBorder: darkSurface ? 'rgba(148, 163, 184, 0.24)' : '#CBD5E1',
+    inputFocusBorder: getLuminance(accent) > 0.1 && getLuminance(accent) < 0.8 ? accent : '#2563EB',
+    sendBtnBg,
+    sendBtnText,
+    chipBg: darkSurface ? '#1E293B' : '#FFFFFF',
+    chipHoverBg: darkSurface ? '#334155' : '#F1F5F9',
+    chipText: darkSurface ? '#E2E8F0' : '#0F172A',
+    chipBorder: darkSurface ? 'rgba(148, 163, 184, 0.25)' : '#CBD5E1',
+    bannerBg: darkSurface ? '#1E293B' : '#F1F5F9',
+    bannerText: darkSurface ? '#E2E8F0' : '#1E293B',
+    bannerBorder: darkSurface ? 'rgba(148, 163, 184, 0.2)' : '#CBD5E1',
+    timestampText: darkSurface ? '#94A3B8' : '#64748B',
+    footerBg: darkSurface ? '#0F172A' : '#F8FAFC',
+    footerText: darkSurface ? '#94A3B8' : '#475569',
+    footerBorder: darkSurface ? 'rgba(148, 163, 184, 0.16)' : '#E2E8F0',
+    accentColor: accent,
   };
 }
 
@@ -486,36 +729,37 @@ export function getShadowStyle(intensity: WidgetShadowIntensity, is3D = false): 
     case 'none':
       return 'none';
     case 'soft':
-      return '0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05)';
+      return '0 4px 16px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.05)';
     case 'medium':
       return is3D
-        ? '0 12px 32px -4px rgba(0, 0, 0, 0.22), 0 4px 12px rgba(0, 0, 0, 0.12)'
-        : '0 8px 24px -2px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.08)';
+        ? '0 12px 32px -4px rgba(15, 23, 42, 0.18), 0 4px 12px rgba(15, 23, 42, 0.08)'
+        : '0 8px 24px -2px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.06)';
     case 'deep':
-      return '0 20px 45px -8px rgba(0, 0, 0, 0.32), 0 8px 18px rgba(0, 0, 0, 0.16)';
+    case 'strong':
+      return '0 20px 45px -8px rgba(15, 23, 42, 0.28), 0 8px 18px rgba(15, 23, 42, 0.14)';
     case 'dramatic':
-      return '0 25px 60px -10px rgba(0, 0, 0, 0.45), 0 12px 24px rgba(0, 0, 0, 0.22)';
+      return '0 25px 60px -10px rgba(15, 23, 42, 0.36), 0 12px 24px rgba(15, 23, 42, 0.18)';
     default:
-      return '0 8px 24px rgba(0, 0, 0, 0.15)';
+      return '0 8px 24px rgba(15, 23, 42, 0.12)';
   }
 }
 
 export function getGlowStyle(intensity: WidgetGlowIntensity, primaryColor: string): string {
   if (intensity === 'none') return 'none';
-  const rgb = parseHexColor(primaryColor) || { r: 15, g: 23, b: 42 };
+  const rgb = parseHexColor(primaryColor) || { r: 37, g: 99, b: 235 };
   if (intensity === 'subtle' || intensity === 'soft') {
-    return `0 0 20px rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.35)`;
+    return `0 0 18px rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.22)`;
   }
-  return `0 0 32px rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.65), 0 0 10px rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.9)`;
+  return `0 0 28px rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.42), 0 0 8px rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.65)`;
 }
 
 export function getGradientBackground(config: WidgetStudioConfig): string {
   if (!config.gradientEnabled || config.gradientType === 'none') {
-    return config.primaryColor;
+    return sanitizeCssColor(config.primaryColor, '#0F172A');
   }
-  const color1 = config.gradientColor1 || config.primaryColor;
-  const color2 = config.gradientColor2 || config.secondaryColor || '#1e293b';
-  const angle = config.gradientAngle ?? 135;
+  const color1 = sanitizeCssColor(config.gradientColor1, sanitizeCssColor(config.primaryColor, '#0F172A'));
+  const color2 = sanitizeCssColor(config.gradientColor2, sanitizeCssColor(config.secondaryColor, '#1E293B'));
+  const angle = typeof config.gradientAngle === 'number' ? Math.max(0, Math.min(360, config.gradientAngle)) : 135;
 
   if (config.gradientType === 'subtle') {
     return `linear-gradient(${angle}deg, ${color1}, ${color2} 80%)`;
@@ -599,5 +843,6 @@ export function getWidgetBoxShadowStyle(
   if (glow === 'none') return shadow;
   return `${shadow}, ${glow}`;
 }
+
 
 

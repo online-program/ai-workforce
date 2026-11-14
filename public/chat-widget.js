@@ -83,6 +83,34 @@
     storedVisitorToken = sessionStorage.getItem(tokenKey) || '';
   } catch (e) {}
 
+  function sanitizeCssColor(val, fallback) {
+    if (typeof val !== 'string') return fallback;
+    var trimmed = val.trim();
+    if (!trimmed || trimmed.length > 64) return fallback;
+    if (/[;<>{}()\\]|url\s*\(|expression\s*\(|javascript:/i.test(trimmed)) return fallback;
+    if (/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(trimmed)) return trimmed;
+    if (/^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(\s*,\s*(0|1|0?\.\d+))?\s*\)$/i.test(trimmed)) return trimmed;
+    return fallback;
+  }
+
+  function getReadableTextColor(bgColor) {
+    var clean = sanitizeCssColor(bgColor, '#0f172a').replace('#', '');
+    var r = 15, g = 23, b = 42;
+    if (clean.length === 3) {
+      r = parseInt(clean[0] + clean[0], 16);
+      g = parseInt(clean[1] + clean[1], 16);
+      b = parseInt(clean[2] + clean[2], 16);
+    } else if (clean.length >= 6 && /^[0-9a-f]+$/i.test(clean.slice(0, 6))) {
+      r = parseInt(clean.slice(0, 2), 16);
+      g = parseInt(clean.slice(2, 4), 16);
+      b = parseInt(clean.slice(4, 6), 16);
+    }
+    var lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return lum > 0.62 ? '#0f172a' : '#ffffff';
+  }
+
+  initialColor = sanitizeCssColor(initialColor, '#0f172a');
+
   // 3. Live Widget State
   var defaultQuickOptions = [
     'Explore Products & Pricing',
@@ -96,11 +124,14 @@
     businessName: 'Alpha',
     welcomeMessage: 'Hi there! 👋 How can Alpha assist you today?',
     themeColor: initialColor,
+    themeMode: 'light',
+    isDark: false,
     position: initialPosition,
     isActive: true,
     messages: [],
     quickOptions: defaultQuickOptions,
     isTyping: false,
+    isSending: false,
     loaded: false,
     currentLeadId: null,
     visitorToken: storedVisitorToken || null,
@@ -113,13 +144,24 @@
 
   var shadow = hostElement.attachShadow ? hostElement.attachShadow({ mode: 'open' }) : hostElement;
 
+  var initialContrast = getReadableTextColor(state.themeColor);
+
   // 5. Inject Scoped CSS using CSS Custom Properties
   var styleSheet = document.createElement('style');
   styleSheet.id = 'aiw-widget-styles';
   styleSheet.textContent = `
     :host, .widget-container {
       --aiw-primary: ${state.themeColor};
-      --aiw-primary-contrast: #ffffff;
+      --aiw-primary-contrast: ${initialContrast};
+      --aiw-surface: #ffffff;
+      --aiw-viewport: #f8fafc;
+      --aiw-ai-bg: #ffffff;
+      --aiw-ai-text: #0f172a;
+      --aiw-ai-border: #e2e8f0;
+      --aiw-input-bg: #f1f5f9;
+      --aiw-input-text: #0f172a;
+      --aiw-input-border: #cbd5e1;
+      --aiw-footer-text: #475569;
       --aiw-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
 
@@ -182,9 +224,9 @@
       height: 580px;
       max-width: calc(100vw - 32px);
       max-height: calc(100vh - 110px);
-      background: #ffffff;
+      background: var(--aiw-surface, #ffffff);
       border-radius: 20px;
-      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(0, 0, 0, 0.06);
+      box-shadow: 0 16px 48px rgba(15, 23, 42, 0.22), 0 0 0 1px rgba(15, 23, 42, 0.08);
       display: none;
       flex-direction: column;
       overflow: hidden;
@@ -210,7 +252,7 @@
     .chat-header {
       background: var(--aiw-primary, ${state.themeColor});
       color: var(--aiw-primary-contrast, #ffffff);
-      padding: 16px 18px;
+      padding: 14px 16px;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -221,25 +263,26 @@
     .header-info {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
     }
 
     .header-avatar {
-      width: 38px;
-      height: 38px;
-      border-radius: 12px;
-      background: rgba(255, 255, 255, 0.2);
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.18);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 18px;
+      font-size: 16px;
+      font-weight: 700;
     }
 
     .header-title {
       font-size: 14px;
-      font-weight: 700;
+      font-weight: 600;
       line-height: 1.2;
-      max-width: 220px;
+      max-width: 210px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -247,7 +290,7 @@
 
     .header-status {
       font-size: 11px;
-      color: rgba(255, 255, 255, 0.85);
+      opacity: 0.85;
       display: flex;
       align-items: center;
       gap: 6px;
@@ -260,49 +303,43 @@
       border-radius: 50%;
       background: #22c55e;
       display: inline-block;
-      box-shadow: 0 0 8px #22c55e;
+      box-shadow: 0 0 8px rgba(34, 197, 94, 0.7);
     }
 
     .header-actions {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 4px;
     }
 
-    .icon-btn {
-      background: transparent;
-      border: none;
-      color: rgba(255, 255, 255, 0.85);
-      cursor: pointer;
-      padding: 6px;
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: background 0.15s ease, color 0.15s ease;
-    }
-
-    .icon-btn:hover {
-      background: rgba(255, 255, 255, 0.2);
-      color: #ffffff;
-    }
-
+    .icon-btn,
     .close-btn {
       background: transparent;
       border: none;
-      color: rgba(255, 255, 255, 0.85);
+      color: var(--aiw-primary-contrast, #ffffff);
+      opacity: 0.85;
       cursor: pointer;
-      padding: 6px;
+      width: 34px;
+      height: 34px;
       border-radius: 8px;
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: background 0.15s ease, color 0.15s ease;
+      transition: background 0.15s ease, opacity 0.15s ease;
     }
 
+    .icon-btn:hover,
     .close-btn:hover {
-      background: rgba(255, 255, 255, 0.2);
-      color: #ffffff;
+      background: rgba(255, 255, 255, 0.18);
+      opacity: 1;
+    }
+
+    .icon-btn:focus-visible,
+    .close-btn:focus-visible,
+    .send-btn:focus-visible,
+    .chat-bubble-btn:focus-visible {
+      outline: 2px solid #2563eb;
+      outline-offset: 2px;
     }
 
     .chat-messages {
@@ -312,7 +349,7 @@
       display: flex;
       flex-direction: column;
       gap: 12px;
-      background: #f8fafc;
+      background: var(--aiw-viewport, #f8fafc);
     }
 
     .chat-messages::-webkit-scrollbar {
@@ -343,7 +380,7 @@
     .msg-bubble {
       padding: 11px 15px;
       font-size: 13px;
-      line-height: 1.45;
+      line-height: 1.48;
       border-radius: 16px;
       word-break: break-word;
       white-space: pre-wrap;
@@ -357,16 +394,16 @@
     }
 
     .msg-row.assistant .msg-bubble {
-      background: #ffffff;
-      color: #0f172a;
-      border: 1px solid #e2e8f0;
+      background: var(--aiw-ai-bg, #ffffff);
+      color: var(--aiw-ai-text, #0f172a);
+      border: 1px solid var(--aiw-ai-border, #e2e8f0);
       border-bottom-left-radius: 4px;
       box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
     }
 
     .msg-time {
       font-size: 10px;
-      color: #94a3b8;
+      color: #64748b;
       margin-top: 4px;
       padding: 0 4px;
     }
@@ -376,8 +413,8 @@
       align-items: center;
       gap: 4px;
       padding: 10px 14px;
-      background: #ffffff;
-      border: 1px solid #e2e8f0;
+      background: var(--aiw-ai-bg, #ffffff);
+      border: 1px solid var(--aiw-ai-border, #e2e8f0);
       border-radius: 16px;
       border-bottom-left-radius: 4px;
       width: fit-content;
@@ -411,11 +448,11 @@
     .opt-btn {
       font-size: 11px;
       font-weight: 500;
-      padding: 5px 11px;
-      border-radius: 9999px;
-      background: #ffffff;
-      color: #1e293b;
-      border: 1px solid #cbd5e1;
+      padding: 6px 12px;
+      border-radius: 10px;
+      background: var(--aiw-ai-bg, #ffffff);
+      color: var(--aiw-ai-text, #1e293b);
+      border: 1px solid var(--aiw-input-border, #cbd5e1);
       cursor: pointer;
       text-align: left;
       transition: all 0.15s ease;
@@ -425,8 +462,7 @@
     }
 
     .opt-btn:hover {
-      background: #f1f5f9;
-      border-color: #94a3b8;
+      border-color: var(--aiw-primary, #0f172a);
       transform: translateY(-1px);
     }
 
@@ -435,37 +471,29 @@
     }
 
     .opt-btn.something-else {
-      background: #f8fafc;
-      color: #475569;
-      border: 1px dashed #94a3b8;
-    }
-
-    .opt-btn.something-else:hover {
-      background: #e2e8f0;
-      border-style: solid;
+      border-style: dashed;
     }
 
     .chat-footer {
       padding: 12px 14px;
-      background: #ffffff;
-      border-top: 1px solid #e2e8f0;
+      background: var(--aiw-surface, #ffffff);
+      border-top: 1px solid var(--aiw-ai-border, #e2e8f0);
     }
 
     .chat-input-form {
       display: flex;
       align-items: center;
       gap: 8px;
-      background: #f1f5f9;
-      border: 1px solid #cbd5e1;
+      background: var(--aiw-input-bg, #f1f5f9);
+      border: 1px solid var(--aiw-input-border, #cbd5e1);
       border-radius: 12px;
       padding: 4px 6px 4px 12px;
       transition: border-color 0.15s ease, background 0.15s ease;
     }
 
     .chat-input-form:focus-within {
-      background: #ffffff;
       border-color: var(--aiw-primary, #0f172a);
-      box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.08);
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
     }
 
     .chat-input {
@@ -473,19 +501,19 @@
       border: none;
       background: transparent;
       font-size: 13px;
-      color: #0f172a;
+      color: var(--aiw-input-text, #0f172a);
       outline: none;
-      padding: 6px 0;
+      padding: 7px 0;
     }
 
     .chat-input::placeholder {
-      color: #94a3b8;
+      color: #64748b;
     }
 
     .send-btn {
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
+      width: 36px;
+      height: 36px;
+      border-radius: 9px;
       background: var(--aiw-primary, ${state.themeColor});
       color: var(--aiw-primary-contrast, #ffffff);
       border: none;
@@ -502,25 +530,24 @@
     }
 
     .send-btn:not(:disabled):hover {
-      transform: scale(1.05);
+      transform: scale(1.04);
     }
 
     .chat-branding {
       text-align: center;
       font-size: 10.5px;
-      color: #64748b;
+      color: var(--aiw-footer-text, #475569);
       margin-top: 8px;
       font-weight: 500;
     }
 
     .chat-branding a {
-      color: #475569;
+      color: var(--aiw-footer-text, #475569);
       text-decoration: none;
-      transition: color 0.15s ease;
+      transition: opacity 0.15s ease;
     }
 
     .chat-branding a:hover {
-      color: #0f172a;
       text-decoration: none;
       opacity: 0.85;
     }
@@ -604,36 +631,74 @@
 
   // 7. Dynamic Configuration and Styling Engine
   function applyThemeColor(color) {
-    if (!color) return;
-    state.themeColor = color;
+    var safe = sanitizeCssColor(color, state.themeColor || '#0f172a');
+    var contrast = getReadableTextColor(safe);
+    state.themeColor = safe;
 
-    // 1. Update CSS Custom Property on shadow host and container
-    widgetContainer.style.setProperty('--aiw-primary', color);
+    widgetContainer.style.setProperty('--aiw-primary', safe);
+    widgetContainer.style.setProperty('--aiw-primary-contrast', contrast);
     if (hostElement.style) {
-      hostElement.style.setProperty('--aiw-primary', color);
+      hostElement.style.setProperty('--aiw-primary', safe);
+      hostElement.style.setProperty('--aiw-primary-contrast', contrast);
     }
 
-    // 2. Direct inline updates for maximum compatibility across browsers
-    bubbleBtn.style.backgroundColor = color;
-    chatHeader.style.backgroundColor = color;
+    bubbleBtn.style.backgroundColor = safe;
+    bubbleBtn.style.color = contrast;
+    chatHeader.style.backgroundColor = safe;
+    chatHeader.style.color = contrast;
     var currentSendBtn = chatFooter.querySelector('.send-btn');
     if (currentSendBtn) {
-      currentSendBtn.style.backgroundColor = color;
+      currentSendBtn.style.backgroundColor = safe;
+      currentSendBtn.style.color = contrast;
     }
 
-    // 3. Update any rendered customer bubbles
     var customerBubbles = chatMessages.querySelectorAll('.msg-row.customer .msg-bubble');
     customerBubbles.forEach(function (el) {
-      el.style.backgroundColor = color;
+      el.style.backgroundColor = safe;
+      el.style.color = contrast;
     });
+  }
+
+  function applyThemeSurface(widgetConfig) {
+    var prefersDark =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var tm = widgetConfig.themeMode;
+    var isDark = tm === 'dark' || (tm === 'system' && prefersDark);
+    state.themeMode = tm || 'light';
+    state.isDark = isDark;
+
+    if (isDark) {
+      widgetContainer.style.setProperty('--aiw-surface', '#0f172a');
+      widgetContainer.style.setProperty('--aiw-viewport', '#0b1120');
+      widgetContainer.style.setProperty('--aiw-ai-bg', '#1e293b');
+      widgetContainer.style.setProperty('--aiw-ai-text', '#f8fafc');
+      widgetContainer.style.setProperty('--aiw-ai-border', 'rgba(148, 163, 184, 0.2)');
+      widgetContainer.style.setProperty('--aiw-input-bg', '#1e293b');
+      widgetContainer.style.setProperty('--aiw-input-text', '#f8fafc');
+      widgetContainer.style.setProperty('--aiw-input-border', 'rgba(148, 163, 184, 0.25)');
+      widgetContainer.style.setProperty('--aiw-footer-text', '#94a3b8');
+    } else {
+      widgetContainer.style.setProperty('--aiw-surface', '#ffffff');
+      widgetContainer.style.setProperty('--aiw-viewport', '#f8fafc');
+      widgetContainer.style.setProperty('--aiw-ai-bg', '#ffffff');
+      widgetContainer.style.setProperty('--aiw-ai-text', '#0f172a');
+      widgetContainer.style.setProperty('--aiw-ai-border', '#e2e8f0');
+      widgetContainer.style.setProperty('--aiw-input-bg', '#f1f5f9');
+      widgetContainer.style.setProperty('--aiw-input-text', '#0f172a');
+      widgetContainer.style.setProperty('--aiw-input-border', '#cbd5e1');
+      widgetContainer.style.setProperty('--aiw-footer-text', '#475569');
+    }
   }
 
   function applyWidgetConfig(widgetConfig) {
     if (!widgetConfig) return;
 
+    applyThemeSurface(widgetConfig);
+
     // Theme color
-    if (widgetConfig.theme_color) {
-      applyThemeColor(widgetConfig.theme_color);
+    if (widgetConfig.primaryColor || widgetConfig.theme_color) {
+      applyThemeColor(widgetConfig.primaryColor || widgetConfig.theme_color);
     }
 
     // Business Name
@@ -645,10 +710,8 @@
 
     // Welcome Message
     if (widgetConfig.welcome_message) {
-      var oldWelcome = state.welcomeMessage;
       state.welcomeMessage = widgetConfig.welcome_message;
 
-      // If only the welcome message was displayed and no user conversation has started, update it
       if (state.messages.length === 1 && state.messages[0].sender === 'assistant') {
         state.messages[0].text = widgetConfig.welcome_message;
         renderMessages();
@@ -992,10 +1055,12 @@
       });
   }
 
-  // 10. Send Chat Message over API
+  // 10. Send Chat Message over API with synchronous mutex & deterministic client_message_id
   function sendMessage(text) {
-    if (!text || !text.trim() || state.isTyping) return;
+    if (!text || !text.trim() || state.isTyping || state.isSending) return;
+    state.isSending = true;
     var userText = text.trim();
+    var clientMessageId = 'cmsg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
 
     addMessage('customer', userText);
     if (inputEl) {
@@ -1026,6 +1091,7 @@
           user_id: configuredUserId || undefined,
           lead_id: state.currentLeadId || undefined,
           message: userText,
+          client_message_id: clientMessageId,
           message_history: historyPayload,
           existing_profile: state.existingProfile || undefined,
           environment: 'production',
@@ -1062,6 +1128,7 @@
       })
       .then(function (data) {
         state.isTyping = false;
+        state.isSending = false;
         if (data && data.visitor_session_token) {
           state.visitorToken = data.visitor_session_token;
           try {
@@ -1086,6 +1153,7 @@
       .catch(function (err) {
         console.error('Chat error:', err);
         state.isTyping = false;
+        state.isSending = false;
         addMessage(
           'assistant',
           'Could not connect to the assistant right now. Please try sending your message again.'

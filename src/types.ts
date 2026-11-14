@@ -875,6 +875,7 @@ export type WorkspaceTab =
 
 export interface ChatMessage {
   id: string;
+  message_id?: string;
   sender: 'customer' | 'assistant' | 'system';
   text: string;
   timestamp: string;
@@ -892,7 +893,12 @@ export interface ChatMessage {
     recommendedNextStep?: string;
   };
   metadata?: {
+    client_message_id?: string;
+    reply_to_client_message_id?: string;
     inquiry_registered?: boolean;
+    db_confirmed?: boolean;
+    delivered?: boolean;
+    read?: boolean;
     lead_id?: string;
     lead_score?: LeadScore;
     detected_intent?: string;
@@ -903,6 +909,7 @@ export interface ChatMessage {
     grounding_source?: string;
     reasoning_mode?: string;
     analysis_summary?: any;
+    [key: string]: any;
   };
 }
 
@@ -1016,6 +1023,7 @@ export interface WidgetConversation {
 }
 
 export type WidgetVisualMode = 'simple' | 'attractive_3d';
+export type WidgetThemeMode = 'light' | 'dark' | 'system';
 export type WidgetLauncherType = 'ai_spark' | 'chat_bubble' | 'custom_logo' | 'logo' | 'ai_workforce';
 export type WidgetLauncherSize = 'small' | 'medium' | 'large';
 export type WidgetLauncherShape = 'circle' | 'rounded_square' | 'squircle';
@@ -1027,6 +1035,7 @@ export type WidgetPosition = 'bottom-right' | 'bottom-left';
 
 export interface WidgetStudioConfig {
   mode: WidgetVisualMode;
+  themeMode?: WidgetThemeMode;
   launcherType: WidgetLauncherType;
   logoUrl?: string;
   primaryColor: string;
@@ -1068,6 +1077,7 @@ export interface WidgetConfig {
 
   // Widget Studio Visual Identity Properties
   mode?: WidgetVisualMode;
+  themeMode?: WidgetThemeMode;
   launcherType?: WidgetLauncherType;
   logoUrl?: string;
   primaryColor?: string;

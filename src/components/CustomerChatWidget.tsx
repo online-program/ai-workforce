@@ -24,6 +24,7 @@ import {
   WidgetStudioConfig,
   WidgetLauncherType,
   WidgetVisualMode,
+  WidgetThemeMode,
   WidgetGradientType,
   WidgetShadowIntensity,
   WidgetGlowIntensity,
@@ -34,7 +35,13 @@ import { auth, db } from '../firebase.ts';
 import { saveInquiry, logUserActivity, saveUserTask, saveConversation, isReservedOfficialWidgetIdClient } from '../services/workspaceService.ts';
 import { isPortfolioDeployment, getPortfolioRoleTitle } from '../utils/portfolioUtils.ts';
 import { hasCategoryConsent } from '../services/consentService.ts';
-import { getAccessibleTextColor, getWidgetBoxShadowStyle } from '../utils/widgetDesignUtils.ts';
+import {
+  getAccessibleTextColor,
+  getWidgetBoxShadowStyle,
+  resolveWidgetThemeTokens,
+  sanitizeCssColor,
+  sanitizeSafeUrl,
+} from '../utils/widgetDesignUtils.ts';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition.ts';
 import { generateAlphaVisitorGreeting, getAlphaInitialSuggestions } from '../utils/alphaWelcomeUtils.ts';
 
@@ -54,6 +61,7 @@ export interface CustomerChatWidgetProps {
 
   // Widget Studio Visual Properties
   mode?: WidgetVisualMode;
+  themeMode?: WidgetThemeMode;
   launcherType?: WidgetLauncherType;
   logoUrl?: string;
   primaryColor?: string;
@@ -421,6 +429,7 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
 
   // Studio visual props
   mode,
+  themeMode,
   logoUrl,
   primaryColor,
   secondaryColor,
@@ -444,10 +453,28 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
   const [liveDocData, setLiveDocData] = useState<any>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
+  const [prefersDark, setPrefersDark] = useState<boolean>(() => {
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+    return false;
+  });
 
-  // Firestore live updates if public widget & real-time broadcast listener
   useEffect(() => {
-    if (!widgetId) return;
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = (e: MediaQueryListEvent) => setPrefersDark(e.matches);
+    mq.addEventListener?.('change', handleChange);
+    return () => mq.removeEventListener?.('change', handleChange);
+  }, []);
+
+  const isOfficialPlatformWidget = isReservedOfficialWidgetIdClient(widgetId);
+
+  // Firestore live updates if customer public widget (official platform widget is strictly immutable)
+  useEffect(() => {
+    setLiveDocData(null);
+    if (!widgetId || isReservedOfficialWidgetIdClient(widgetId)) return;
+
     let unsub = () => {};
     try {
       const publicDocRef = doc(db, 'public_widgets', widgetId);
@@ -503,51 +530,78 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
     };
   }, [widgetId]);
 
-  const activeCompanyProfile = liveDocData?.company_profile || companyProfile;
-  const effectiveBusinessName = liveDocData?.business_name || activeCompanyProfile?.name || businessName;
+  const effectiveLiveData = isOfficialPlatformWidget ? null : liveDocData;
+  const activeCompanyProfile = effectiveLiveData?.company_profile || companyProfile;
+  const effectiveBusinessName = effectiveLiveData?.business_name || activeCompanyProfile?.name || businessName;
   const isPortfolio = isPortfolioDeployment(activeCompanyProfile);
   const roleTitle = isPortfolio ? getPortfolioRoleTitle(activeCompanyProfile) : 'AI Sales Manager';
 
-  // Harmonize mode and studio settings with liveDocData taking authoritative priority
-  const resolvedMode = (liveDocData?.mode || liveDocData?.design_style || studioConfig?.mode || mode || design_style || 'attractive_3d') as WidgetVisualMode;
+  // Harmonize mode, themeMode, and studio settings
+  const resolvedMode = (effectiveLiveData?.mode || effectiveLiveData?.design_style || studioConfig?.mode || mode || design_style || 'attractive_3d') as WidgetVisualMode;
+  const resolvedThemeMode: WidgetThemeMode = isOfficialPlatformWidget
+    ? 'dark'
+    : (effectiveLiveData?.themeMode || effectiveLiveData?.studioConfig?.themeMode || studioConfig?.themeMode || themeMode || 'light');
   const isSimple = resolvedMode === 'simple';
 
-  const resolvedPrimaryColor = liveDocData?.primaryColor || liveDocData?.theme_color || liveDocData?.studioConfig?.primaryColor || studioConfig?.primaryColor || primaryColor || themeColor || '#000000';
-  const resolvedSecondaryColor = liveDocData?.secondaryColor || liveDocData?.studioConfig?.secondaryColor || studioConfig?.secondaryColor || secondaryColor || '#10b981';
-  const resolvedBgColor = liveDocData?.backgroundColor || liveDocData?.studioConfig?.backgroundColor || studioConfig?.backgroundColor || backgroundColor || (isSimple ? '#ffffff' : '#0a0a0c');
-  const resolvedTextColor = liveDocData?.textColor || liveDocData?.studioConfig?.textColor || studioConfig?.textColor || textColor || (isSimple ? '#0f172a' : '#ffffff');
+  const resolvedPrimaryColor = sanitizeCssColor(
+    effectiveLiveData?.primaryColor || effectiveLiveData?.theme_color || effectiveLiveData?.studioConfig?.primaryColor || studioConfig?.primaryColor || primaryColor || themeColor,
+    isOfficialPlatformWidget ? '#09090B' : '#0F172A'
+  );
+  const resolvedSecondaryColor = sanitizeCssColor(
+    effectiveLiveData?.secondaryColor || effectiveLiveData?.studioConfig?.secondaryColor || studioConfig?.secondaryColor || secondaryColor,
+    isOfficialPlatformWidget ? '#FFFFFF' : '#2563EB'
+  );
+  const resolvedLogoUrl = sanitizeSafeUrl(
+    effectiveLiveData?.logoUrl || effectiveLiveData?.studioConfig?.logoUrl || studioConfig?.logoUrl || logoUrl
+  );
 
-  const resolvedAiMsgBg = liveDocData?.aiMessageColor || liveDocData?.studioConfig?.aiMessageColor || studioConfig?.aiMessageColor || aiMessageColor || (isSimple ? '#f1f5f9' : '#141418');
-  const resolvedAiMsgText = liveDocData?.aiMessageTextColor || liveDocData?.studioConfig?.aiMessageTextColor || studioConfig?.aiMessageTextColor || aiMessageTextColor || (isSimple ? '#0f172a' : '#f4f4f5');
+  const tokens = resolveWidgetThemeTokens(
+    {
+      mode: resolvedMode,
+      themeMode: resolvedThemeMode,
+      primaryColor: resolvedPrimaryColor,
+      secondaryColor: resolvedSecondaryColor,
+      backgroundColor: effectiveLiveData?.backgroundColor || effectiveLiveData?.studioConfig?.backgroundColor || studioConfig?.backgroundColor || backgroundColor,
+      textColor: effectiveLiveData?.textColor || effectiveLiveData?.studioConfig?.textColor || studioConfig?.textColor || textColor,
+      aiMessageColor: effectiveLiveData?.aiMessageColor || effectiveLiveData?.studioConfig?.aiMessageColor || studioConfig?.aiMessageColor || aiMessageColor,
+      aiMessageTextColor: effectiveLiveData?.aiMessageTextColor || effectiveLiveData?.studioConfig?.aiMessageTextColor || studioConfig?.aiMessageTextColor || aiMessageTextColor,
+      userMessageColor: effectiveLiveData?.userMessageColor || effectiveLiveData?.studioConfig?.userMessageColor || studioConfig?.userMessageColor || userMessageColor,
+      userMessageTextColor: effectiveLiveData?.userMessageTextColor || effectiveLiveData?.studioConfig?.userMessageTextColor || studioConfig?.userMessageTextColor || userMessageTextColor,
+    },
+    prefersDark
+  );
 
-  const resolvedUserMsgBg = liveDocData?.userMessageColor || liveDocData?.studioConfig?.userMessageColor || studioConfig?.userMessageColor || userMessageColor || (isSimple ? resolvedPrimaryColor : '#ffffff');
-  const resolvedUserMsgText = liveDocData?.userMessageTextColor || liveDocData?.studioConfig?.userMessageTextColor || studioConfig?.userMessageTextColor || userMessageTextColor || (isSimple ? '#ffffff' : '#000000');
+  const isLightBg = tokens.effectiveMode === 'light';
+  const resolvedBgColor = tokens.surfaceBg;
+  const resolvedTextColor = tokens.aiBubbleText;
+  const resolvedAiMsgBg = tokens.aiBubbleBg;
+  const resolvedAiMsgText = tokens.aiBubbleText;
+  const resolvedUserMsgBg = tokens.userBubbleBg;
+  const resolvedUserMsgText = tokens.userBubbleText;
 
-  const resolvedBorderRadius = liveDocData?.borderRadius !== undefined
-    ? liveDocData.borderRadius
-    : (liveDocData?.studioConfig?.borderRadius !== undefined
-      ? liveDocData.studioConfig.borderRadius
+  const resolvedBorderRadius = effectiveLiveData?.borderRadius !== undefined
+    ? effectiveLiveData.borderRadius
+    : (effectiveLiveData?.studioConfig?.borderRadius !== undefined
+      ? effectiveLiveData.studioConfig.borderRadius
       : (borderRadius !== undefined
         ? borderRadius
-        : (studioConfig?.borderRadius !== undefined ? studioConfig.borderRadius : (isSimple ? 14 : 18))));
+        : (studioConfig?.borderRadius !== undefined ? studioConfig.borderRadius : (isSimple ? 16 : 20))));
 
-  const resolvedShadow = liveDocData?.shadowIntensity || liveDocData?.studioConfig?.shadowIntensity || shadowIntensity || studioConfig?.shadowIntensity || (isSimple ? 'soft' : 'medium');
-  const resolvedGlow = liveDocData?.glowIntensity || liveDocData?.studioConfig?.glowIntensity || glowIntensity || studioConfig?.glowIntensity || 'none';
+  const resolvedShadow = effectiveLiveData?.shadowIntensity || effectiveLiveData?.studioConfig?.shadowIntensity || shadowIntensity || studioConfig?.shadowIntensity || (isSimple ? 'soft' : 'medium');
+  const resolvedGlow = effectiveLiveData?.glowIntensity || effectiveLiveData?.studioConfig?.glowIntensity || glowIntensity || studioConfig?.glowIntensity || 'none';
 
-  const resolvedGradientEnabled = liveDocData?.gradientEnabled !== undefined
-    ? liveDocData.gradientEnabled
-    : (liveDocData?.studioConfig?.gradientEnabled !== undefined
-      ? liveDocData.studioConfig.gradientEnabled
+  const resolvedGradientEnabled = effectiveLiveData?.gradientEnabled !== undefined
+    ? effectiveLiveData.gradientEnabled
+    : (effectiveLiveData?.studioConfig?.gradientEnabled !== undefined
+      ? effectiveLiveData.studioConfig.gradientEnabled
       : (gradientEnabled ?? studioConfig?.gradientEnabled ?? false));
-  const resolvedGradientType = liveDocData?.gradientType || liveDocData?.studioConfig?.gradientType || gradientType || studioConfig?.gradientType || 'none';
-  const resolvedGradientColor1 = liveDocData?.gradientColor1 || liveDocData?.studioConfig?.gradientColor1 || gradientColor1 || studioConfig?.gradientColor1 || resolvedPrimaryColor;
-  const resolvedGradientColor2 = liveDocData?.gradientColor2 || liveDocData?.studioConfig?.gradientColor2 || gradientColor2 || studioConfig?.gradientColor2 || resolvedSecondaryColor;
-  const resolvedGradientAngle = liveDocData?.gradientAngle ?? liveDocData?.studioConfig?.gradientAngle ?? gradientAngle ?? studioConfig?.gradientAngle ?? 135;
-
-  const isLightBg = isSimple || (resolvedBgColor && (resolvedBgColor === '#ffffff' || resolvedBgColor.toLowerCase() === '#fff' || resolvedBgColor.toLowerCase().startsWith('#f')));
+  const resolvedGradientType = effectiveLiveData?.gradientType || effectiveLiveData?.studioConfig?.gradientType || gradientType || studioConfig?.gradientType || 'none';
+  const resolvedGradientColor1 = sanitizeCssColor(effectiveLiveData?.gradientColor1 || effectiveLiveData?.studioConfig?.gradientColor1 || gradientColor1 || studioConfig?.gradientColor1, resolvedPrimaryColor);
+  const resolvedGradientColor2 = sanitizeCssColor(effectiveLiveData?.gradientColor2 || effectiveLiveData?.studioConfig?.gradientColor2 || gradientColor2 || studioConfig?.gradientColor2, resolvedSecondaryColor);
+  const resolvedGradientAngle = effectiveLiveData?.gradientAngle ?? effectiveLiveData?.studioConfig?.gradientAngle ?? gradientAngle ?? studioConfig?.gradientAngle ?? 135;
 
   let widgetContainerBg = resolvedBgColor;
-  if (resolvedGradientEnabled && resolvedGradientType !== 'none') {
+  if (resolvedGradientEnabled && resolvedGradientType !== 'none' && !isOfficialPlatformWidget) {
     if (resolvedGradientType === 'subtle') {
       widgetContainerBg = `linear-gradient(${resolvedGradientAngle}deg, ${resolvedGradientColor1}, ${resolvedGradientColor2} 80%)`;
     } else {
@@ -555,16 +609,13 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
     }
   }
 
-  let headerBg = resolvedPrimaryColor;
-  if (!isSimple && (resolvedPrimaryColor === '#000000' || resolvedPrimaryColor === '#0f172a' || !resolvedPrimaryColor)) {
-    headerBg = '#000000';
-  }
-  const headerTextColor = getAccessibleTextColor(headerBg);
+  const headerBg = tokens.headerBg;
+  const headerTextColor = tokens.headerText;
 
   // Dynamic Opening Greeting
   const effectiveWelcomeMessage = generateAlphaVisitorGreeting(
     activeCompanyProfile,
-    liveDocData?.welcome_message || welcomeMessage
+    effectiveLiveData?.welcome_message || welcomeMessage
   );
   const initialOptions = getAlphaInitialSuggestions(activeCompanyProfile);
 
@@ -714,6 +765,7 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
     };
 
     const syncServerConversation = async () => {
+      if (isSendingRef.current) return;
       try {
         let token = await ensureVisitorToken(false);
         if (!token) return;
@@ -744,7 +796,7 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
         if (!res.ok) return;
         const data = await res.json();
         if (data && data.success && Array.isArray(data.messages) && data.messages.length > 0) {
-          if (!isMounted) return;
+          if (!isMounted || isSendingRef.current) return;
 
           const undeliveredIds = data.messages
             .filter((sm: any) => sm.message_id && sm.sender === 'assistant' && !sm.metadata?.delivered)
@@ -757,19 +809,71 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
             : [];
 
           setMessages((prev) => {
-            const existingIds = new Set(
-              prev.map((m: any) => m.message_id || m.id).filter(Boolean)
-            );
-            const newServerMsgs = data.messages.filter((sm: any) => {
-              const id = sm.message_id || sm.id;
-              if (id) return !existingIds.has(id);
-              return !prev.some((pm: any) => pm.sender === sm.sender && pm.text === sm.text);
-            });
+            const existingIds = new Set<string>();
+            const existingClientIds = new Set<string>();
+            const existingReplyClientIds = new Set<string>();
 
-            if (newServerMsgs.length > 0) {
-              return [...prev, ...newServerMsgs];
+            for (const m of prev) {
+              if (m.message_id) existingIds.add(String(m.message_id));
+              if (m.id) existingIds.add(String(m.id));
+              if (m.metadata?.client_message_id) existingClientIds.add(String(m.metadata.client_message_id));
+              if (m.metadata?.reply_to_client_message_id) {
+                existingReplyClientIds.add(String(m.metadata.reply_to_client_message_id));
+              }
             }
-            return prev;
+
+            let changed = false;
+            const nextList = [...prev];
+
+            for (const sm of data.messages) {
+              const smId = sm.message_id || sm.id;
+              const smClientId = sm.metadata?.client_message_id;
+              const smReplyToClientId = sm.metadata?.reply_to_client_message_id;
+
+              if (smId && existingIds.has(String(smId))) {
+                continue;
+              }
+              if (sm.sender === 'customer' && smClientId && existingClientIds.has(String(smClientId))) {
+                // Reconcile optimistic customer message id with authoritative server message_id in-place
+                const idx = nextList.findIndex(
+                  (pm) => pm.id === smClientId || pm.metadata?.client_message_id === smClientId
+                );
+                if (idx !== -1 && smId && !nextList[idx].message_id) {
+                  nextList[idx] = { ...nextList[idx], message_id: String(smId) };
+                  existingIds.add(String(smId));
+                  changed = true;
+                }
+                continue;
+              }
+              if (
+                sm.sender === 'assistant' &&
+                smReplyToClientId &&
+                existingReplyClientIds.has(String(smReplyToClientId))
+              ) {
+                const idx = nextList.findIndex(
+                  (pm) => pm.metadata?.reply_to_client_message_id === smReplyToClientId
+                );
+                if (idx !== -1 && smId && !nextList[idx].message_id) {
+                  nextList[idx] = { ...nextList[idx], message_id: String(smId) };
+                  existingIds.add(String(smId));
+                  changed = true;
+                }
+                continue;
+              }
+              const duplicateByContent = prev.some(
+                (pm: any) => pm.sender === sm.sender && pm.text === sm.text
+              );
+              if (duplicateByContent) continue;
+
+              nextList.push({
+                ...sm,
+                id: String(smId || sm.id || `srv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`),
+              });
+              if (smId) existingIds.add(String(smId));
+              changed = true;
+            }
+
+            return changed ? nextList : prev;
           });
 
           if (undeliveredIds.length > 0) {
@@ -859,9 +963,11 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Stream state isolation refs
+  // Stream & turn mutex refs
   const activeAbortControllerRef = useRef<AbortController | null>(null);
   const activeRequestIdRef = useRef<string | null>(null);
+  const isSendingRef = useRef<boolean>(false);
+  const failedTurnRef = useRef<{ clientMessageId: string; text: string } | null>(null);
   const lastSentMessageRef = useRef<{ text: string; time: number } | null>(null);
 
   // Progressive streaming reveal state
@@ -910,6 +1016,11 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
 
   // Reset / Start a pristine fresh conversation without prior context contamination
   const handleStartNewChat = () => {
+    if (activeAbortControllerRef.current) {
+      activeAbortControllerRef.current.abort('Conversation reset');
+    }
+    isSendingRef.current = false;
+    failedTurnRef.current = null;
     const freshConvId = `conv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     setConversationId(freshConvId);
     setCurrentLeadId(null);
@@ -917,6 +1028,9 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
     setHumanHandoffRequested(false);
     setHasError(false);
     setFailedMessage(null);
+    setIsTyping(false);
+    setStreamingMsgId(null);
+    setDisplayedStreamingText('');
     setMessages([
       {
         id: 'welcome-msg',
@@ -994,8 +1108,8 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
     }, 16);
   };
 
-  // Send message execution
-  const executeSendMessage = async (textToSend: string) => {
+  // Send message execution with synchronous mutex & deterministic client_message_id idempotency
+  const executeSendMessage = async (textToSend: string, retryClientMsgId?: string) => {
     if (isListening) {
       stopListening();
     }
@@ -1003,20 +1117,24 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
     const userMsg = textToSend.trim();
     if (!userMsg) return;
 
-    // Deduplication check: prevent rapid duplicate message submission within 600ms
+    // Strict synchronous turn mutex prevents rapid double-click / double-Enter duplicates
+    if (isSendingRef.current) {
+      return;
+    }
+
+    // Deduplication check for accidental rapid repeat clicks
     if (
+      !retryClientMsgId &&
       lastSentMessageRef.current &&
       lastSentMessageRef.current.text === userMsg &&
-      Date.now() - lastSentMessageRef.current.time < 600
+      Date.now() - lastSentMessageRef.current.time < 900
     ) {
       return;
     }
+
+    isSendingRef.current = true;
     lastSentMessageRef.current = { text: userMsg, time: Date.now() };
 
-    // Abort any existing active request/stream
-    if (activeAbortControllerRef.current) {
-      activeAbortControllerRef.current.abort('New request initiated');
-    }
     const controller = new AbortController();
     activeAbortControllerRef.current = controller;
     const currentRequestId = `req-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
@@ -1026,24 +1144,38 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
     setFailedMessage(null);
     setVoiceNotice(null);
 
-    const userMsgId = `msg-${Date.now()}`;
+    const clientMsgId =
+      retryClientMsgId || `cmsg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    failedTurnRef.current = { clientMessageId: clientMsgId, text: userMsg };
+
     const userMessageObj: ChatMessage = {
-      id: userMsgId,
+      id: clientMsgId,
       sender: 'customer',
       text: userMsg,
       timestamp: new Date().toISOString(),
+      metadata: {
+        client_message_id: clientMsgId,
+      },
     };
+
+    const assistantMsgId = `amsg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
     let historySnapshot: ChatMessage[] = [];
     setMessages((prev) => {
-      historySnapshot = [...prev, userMessageObj];
+      const cleanedPrev = prev.filter((m) => m.id !== assistantMsgId && m.text.trim().length > 0);
+      const alreadyHasCustomerTurn = cleanedPrev.some(
+        (m) => m.id === clientMsgId || m.metadata?.client_message_id === clientMsgId
+      );
+      historySnapshot = alreadyHasCustomerTurn ? cleanedPrev : [...cleanedPrev, userMessageObj];
       return historySnapshot;
     });
-    playAudioChime('send');
 
-    setInputText('');
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
+    if (!retryClientMsgId) {
+      playAudioChime('send');
+      setInputText('');
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
     }
     setIsTyping(true);
 
@@ -1088,7 +1220,11 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
         activeVisitorToken = await mintSessionToken(activeConvId);
       }
 
-      const sendChatRequest = async (tokenToUse: string | null, convIdToUse: string) => {
+      const sendChatRequest = async (
+        tokenToUse: string | null,
+        convIdToUse: string,
+        useStream: boolean
+      ) => {
         const reqHeaders: Record<string, string> = {
           'Content-Type': 'application/json',
           'x-consent-analytics': hasAnalyticsConsent ? '1' : '0',
@@ -1112,7 +1248,7 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
             thinkMode: 'auto',
             lead_id: currentLeadId || undefined,
             message: userMsg,
-            client_message_id: userMsgId,
+            client_message_id: clientMsgId,
             user_id: canUseSimulation ? userId : undefined,
             customer_name: leadProfile?.customer_name || 'Website Visitor',
             existing_profile: leadProfile || undefined,
@@ -1124,41 +1260,45 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
             company_profile: canUseSimulation ? activeCompanyProfile : undefined,
             environment: canUseSimulation ? 'simulation' : 'production',
             is_simulated: canUseSimulation,
-            stream: true,
+            stream: useStream,
             analytics_consent: hasAnalyticsConsent,
           }),
         });
       };
 
-      let response = await sendChatRequest(activeVisitorToken, activeConvId);
-
-      if ((response.status === 401 || response.status === 403) && !canUseSimulation && effectiveWidgetIdForChat) {
-        const errBody = await response.json().catch(() => ({} as any));
-        const errCode = typeof errBody?.code === 'string' ? errBody.code : '';
-        if (errCode === 'UNAUTHORIZED_OWNERSHIP') {
-          activeConvId = `conv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-          setConversationId(activeConvId);
-          setVisitorToken(null);
-          activeVisitorToken = await mintSessionToken(activeConvId);
-          if (activeVisitorToken) {
-            response = await sendChatRequest(activeVisitorToken, activeConvId);
-          }
-        } else if (response.status === 401 || errCode.startsWith('TOKEN_')) {
-          activeVisitorToken = await mintSessionToken(activeConvId);
-          if (activeVisitorToken) {
-            response = await sendChatRequest(activeVisitorToken, activeConvId);
+      const executeWithAuthRefresh = async (useStream: boolean): Promise<Response> => {
+        let res = await sendChatRequest(activeVisitorToken, activeConvId, useStream);
+        if ((res.status === 401 || res.status === 403) && !canUseSimulation && effectiveWidgetIdForChat) {
+          const errBody = await res.json().catch(() => ({} as any));
+          const errCode = typeof errBody?.code === 'string' ? errBody.code : '';
+          if (errCode === 'UNAUTHORIZED_OWNERSHIP') {
+            activeConvId = `conv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            setConversationId(activeConvId);
+            setVisitorToken(null);
+            activeVisitorToken = await mintSessionToken(activeConvId);
+            if (activeVisitorToken) {
+              res = await sendChatRequest(activeVisitorToken, activeConvId, useStream);
+            }
+          } else if (res.status === 401 || errCode.startsWith('TOKEN_')) {
+            activeVisitorToken = await mintSessionToken(activeConvId);
+            if (activeVisitorToken) {
+              res = await sendChatRequest(activeVisitorToken, activeConvId, useStream);
+            }
           }
         }
-      }
+        return res;
+      };
+
+      let response = await executeWithAuthRefresh(true);
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || `Server error (${response.status})`);
       }
 
-      const assistantMsgId = `msg-${Date.now() + 1}`;
       let accumulatedText = '';
       let lastResult: any = null;
+      let streamFailedOrEmpty = false;
 
       if (activeRequestIdRef.current !== currentRequestId) return;
 
@@ -1181,6 +1321,9 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
             sender: 'assistant',
             text: '',
             timestamp: new Date().toISOString(),
+            metadata: {
+              reply_to_client_message_id: clientMsgId,
+            },
           },
         ]);
         setStreamingMsgId(assistantMsgId);
@@ -1188,35 +1331,42 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
         setIsTyping(false);
 
         let buffer = '';
-        while (true) {
-          if (activeRequestIdRef.current !== currentRequestId || controller.signal.aborted) {
-            break;
-          }
+        try {
+          while (true) {
+            if (activeRequestIdRef.current !== currentRequestId || controller.signal.aborted) {
+              break;
+            }
 
-          const { value, done } = await reader.read();
-          if (done) break;
+            const { value, done } = await reader.read();
+            if (done) break;
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n\n');
-          buffer = lines.pop() || '';
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n\n');
+            buffer = lines.pop() || '';
 
-          for (const line of lines) {
-            if (activeRequestIdRef.current !== currentRequestId || controller.signal.aborted) break;
-            const cleanLine = line.trim();
-            if (cleanLine.startsWith('data: ')) {
-              try {
-                const eventData = JSON.parse(cleanLine.slice(6));
-                if (eventData.type === 'chunk' && eventData.text) {
-                  accumulatedText += eventData.text;
-                  setDisplayedStreamingText(accumulatedText);
-                } else if (eventData.type === 'metadata' && eventData.data) {
-                  lastResult = eventData.data;
+            for (const line of lines) {
+              if (activeRequestIdRef.current !== currentRequestId || controller.signal.aborted) break;
+              const cleanLine = line.trim();
+              if (cleanLine.startsWith('data: ')) {
+                try {
+                  const eventData = JSON.parse(cleanLine.slice(6));
+                  if (eventData.type === 'chunk' && eventData.text) {
+                    accumulatedText += eventData.text;
+                    setDisplayedStreamingText(accumulatedText);
+                  } else if (eventData.type === 'metadata' && eventData.data) {
+                    lastResult = eventData.data;
+                  } else if (eventData.type === 'error') {
+                    streamFailedOrEmpty = true;
+                  }
+                } catch (err) {
+                  console.warn('Could not parse streamed line:', err);
                 }
-              } catch (err) {
-                console.warn('Could not parse streamed line:', err);
               }
             }
           }
+        } catch (readErr) {
+          console.warn('Stream read interrupted:', readErr);
+          streamFailedOrEmpty = true;
         }
 
         if (activeRequestIdRef.current !== currentRequestId || controller.signal.aborted) {
@@ -1238,16 +1388,34 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
         setDisplayedStreamingText('');
       }
 
-      // 3. Robust client-side reply extraction without destructive preposition filtering
-      const cleanAssistantText = (accumulatedText.trim() || lastResult?.reply || '').trim();
-      let assistantReply = cleanAssistantText;
+      // Automatic 1-shot non-streaming JSON fallback if SSE dropped or returned empty reply before throwing
+      if ((streamFailedOrEmpty || (!accumulatedText.trim() && !lastResult?.reply)) && !controller.signal.aborted) {
+        try {
+          const fallbackRes = await executeWithAuthRefresh(false);
+          if (fallbackRes.ok) {
+            const jsonFallback = await fallbackRes.json().catch(() => null);
+            if (jsonFallback && typeof jsonFallback.reply === 'string' && jsonFallback.reply.trim()) {
+              lastResult = jsonFallback;
+              accumulatedText = jsonFallback.reply;
+            }
+          }
+        } catch (fallbackErr) {
+          console.warn('Non-streaming fallback failed:', fallbackErr);
+        }
+      }
 
-      // If backend returned nothing or invalid text, trigger an identifiable temporary error/retry state without fabricating fake acknowledgments
-      if (!assistantReply) {
-        assistantReply = "I hit a temporary response error. Please retry.";
+      // 3. Robust client-side reply extraction
+      const cleanAssistantText = (accumulatedText.trim() || lastResult?.reply || '').trim();
+      if (!cleanAssistantText) {
+        // Remove empty streaming placeholder before entering clean retry banner state
+        setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId));
         setHasError(true);
         setFailedMessage(userMsg);
+        return;
       }
+
+      const assistantReply = cleanAssistantText;
+      failedTurnRef.current = null;
 
       if (lastResult?.inquiry_id && !currentLeadId) {
         setCurrentLeadId(lastResult.inquiry_id);
@@ -1267,8 +1435,12 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
         .filter((opt: any) => typeof opt === 'string' && opt.trim() && !/DEBUG|SYSTEM|Score|Stage/i.test(opt))
         .slice(0, 3);
 
+      const serverMsgId = lastResult?.message_id ? String(lastResult.message_id) : undefined;
+      const serverCustMsgId = lastResult?.customer_message_id ? String(lastResult.customer_message_id) : undefined;
+
       const assistantMessageObj: ChatMessage = {
-        id: assistantMsgId,
+        id: serverMsgId || assistantMsgId,
+        message_id: serverMsgId,
         sender: 'assistant',
         text: assistantReply,
         timestamp: new Date().toISOString(),
@@ -1282,16 +1454,27 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
           inquiry_registered: lastResult?.inquiry_registered,
           reasoning_mode: lastResult?.reasoning_mode,
           analysis_summary: lastResult?.analysis_summary,
+          reply_to_client_message_id: clientMsgId,
+          db_confirmed: lastResult?.db_confirmed,
         },
       };
 
-      // Functional state update replacing temporary streaming message in-place
+      // Functional state update replacing temporary streaming message & reconciling customer message_id in-place
       setMessages((prev) => {
-        const exists = prev.some((m) => m.id === assistantMsgId);
+        const updatedCustomerPrev = prev.map((m) =>
+          m.id === clientMsgId && serverCustMsgId
+            ? { ...m, message_id: serverCustMsgId }
+            : m
+        );
+        const exists = updatedCustomerPrev.some((m) => m.id === assistantMsgId || (serverMsgId && m.message_id === serverMsgId));
         if (exists) {
-          return prev.map((m) => (m.id === assistantMsgId ? assistantMessageObj : m));
+          return updatedCustomerPrev.map((m) =>
+            m.id === assistantMsgId || (serverMsgId && m.message_id === serverMsgId)
+              ? assistantMessageObj
+              : m
+          );
         }
-        return [...prev, assistantMessageObj];
+        return [...updatedCustomerPrev, assistantMessageObj];
       });
       playAudioChime('receive');
       if (lastResult?.visitor_session_token) {
@@ -1413,9 +1596,14 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
       }
     } catch (err) {
       console.warn('Chat request fallback:', err);
+      setStreamingMsgId(null);
+      setDisplayedStreamingText('');
+      setMessages((prev) => prev.filter((m) => !(m.sender === 'assistant' && !m.text.trim())));
       setIsTyping(false);
       setHasError(true);
       setFailedMessage(userMsg);
+    } finally {
+      isSendingRef.current = false;
     }
   };
 
@@ -1442,7 +1630,10 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
   };
 
   const handleRetry = () => {
-    if (failedMessage) {
+    const failedTurn = failedTurnRef.current;
+    if (failedTurn) {
+      executeSendMessage(failedTurn.text, failedTurn.clientMessageId);
+    } else if (failedMessage) {
       executeSendMessage(failedMessage);
     }
   };
@@ -1488,86 +1679,107 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
         background: widgetContainerBg,
         boxShadow: widgetShadow,
         color: resolvedTextColor,
+        borderColor: isLightBg ? 'rgba(15, 23, 42, 0.10)' : 'rgba(255, 255, 255, 0.12)',
       }}
-      className={`flex flex-col h-full w-full overflow-hidden font-sans select-text border ${isLightBg ? 'border-slate-200 bg-white text-slate-900' : 'border-neutral-800 bg-[#0a0a0c] text-neutral-100'} shadow-2xl relative transition-all duration-200`}
+      className="flex flex-col h-full w-full overflow-hidden font-sans select-text border shadow-2xl relative transition-all duration-200"
     >
-      {/* Widget Header - High Polish Compact Linear Style */}
+      {/* Widget Header - Refined Apple x ChatGPT Chrome */}
       <div
         style={{
           backgroundColor: headerBg,
           color: headerTextColor,
-          borderBottomColor: isLightBg ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.1)',
+          borderBottomColor: tokens.headerBorder,
         }}
         className="px-4 py-3 border-b flex items-center justify-between select-none shrink-0 z-20 transition-colors"
       >
         <div className="flex items-center space-x-2.5 min-w-0">
           <div
             style={{
-              backgroundColor: isSimple ? resolvedPrimaryColor : '#ffffff',
-              color: isSimple ? '#ffffff' : '#000000',
+              backgroundColor: resolvedLogoUrl ? '#FFFFFF' : isLightBg ? '#FFFFFF' : '#18181B',
+              color: isLightBg ? '#0F172A' : '#FFFFFF',
+              borderColor: isLightBg ? 'rgba(15,23,42,0.12)' : 'rgba(255,255,255,0.18)',
             }}
-            className="w-6 h-6 rounded-md flex items-center justify-center font-mono font-extrabold text-xs shrink-0 shadow-xs"
+            className="w-8 h-8 rounded-lg border flex items-center justify-center font-mono font-bold text-xs shrink-0 shadow-xs overflow-hidden"
           >
-            α
+            {resolvedLogoUrl ? (
+              <img src={resolvedLogoUrl} alt={effectiveBusinessName} className="w-6 h-6 object-contain" referrerPolicy="no-referrer" />
+            ) : (
+              <span>α</span>
+            )}
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              <h3 style={{ color: headerTextColor }} className="text-xs font-bold leading-none tracking-tight">
+              <h3 style={{ color: headerTextColor }} className="text-[13px] font-semibold leading-tight tracking-tight truncate">
                 {roleTitle}
               </h3>
-              <div className="flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
-                <span className="text-[9px] font-mono font-semibold text-emerald-400">LIVE</span>
-              </div>
+              <span
+                aria-label="Online"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium tracking-wide bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 shrink-0"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                <span>LIVE</span>
+              </span>
             </div>
             <p
-              style={{ color: isLightBg && headerBg === '#ffffff' ? '#64748b' : (headerTextColor === '#000000' ? '#475569' : '#a1a1aa') }}
-              className="text-[10px] truncate mt-0.5 leading-none font-medium"
+              style={{ color: tokens.headerSubtext }}
+              className="text-[11px] truncate mt-0.5 leading-tight font-medium"
             >
               {effectiveBusinessName}
             </p>
           </div>
         </div>
 
-        {/* Header Action Controls */}
-        <div className="flex items-center space-x-1 flex-shrink-0">
-          {/* New Chat / Reset button */}
+        {/* Header Action Controls (>= 36-40px accessible touch target + focus ring) */}
+        <div className="flex items-center space-x-0.5 flex-shrink-0">
           <button
+            type="button"
             onClick={handleStartNewChat}
             title="Start new conversation"
-            className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition-colors cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-white"
+            style={{ color: headerTextColor }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = tokens.headerHoverBg)}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+            className="w-9 h-9 rounded-lg flex items-center justify-center transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             aria-label="Start new conversation"
           >
-            <RotateCcw className="w-3.5 h-3.5" />
+            <RotateCcw className="w-4 h-4 opacity-85" />
           </button>
 
-          {/* Refresh / Re-sync button (Never erases conversation) */}
           <button
+            type="button"
             onClick={handleReloadSyncConversation}
             disabled={isSyncing}
             title="Re-sync conversation"
-            className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition-colors cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-white"
+            style={{ color: headerTextColor }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = tokens.headerHoverBg)}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+            className="w-9 h-9 rounded-lg flex items-center justify-center transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             aria-label="Re-sync conversation"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-white' : ''}`} />
+            <RefreshCw className={`w-4 h-4 opacity-85 ${isSyncing ? 'animate-spin' : ''}`} />
           </button>
 
-          {/* Mute audio chimes toggle */}
           <button
+            type="button"
             onClick={toggleMute}
-            title={isMuted ? "Unmute sound chimes" : "Mute sound chimes"}
-            className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition-colors cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-white"
+            title={isMuted ? 'Unmute sound chimes' : 'Mute sound chimes'}
+            style={{ color: headerTextColor }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = tokens.headerHoverBg)}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+            className="w-9 h-9 rounded-lg flex items-center justify-center transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             aria-label="Toggle sound chimes"
           >
-            {isMuted ? <VolumeX className="w-3.5 h-3.5 text-neutral-500" /> : <Volume2 className="w-3.5 h-3.5 text-neutral-300" />}
+            {isMuted ? <VolumeX className="w-4 h-4 opacity-65" /> : <Volume2 className="w-4 h-4 opacity-85" />}
           </button>
 
-          {/* Close button (Always clickable, closes immediately) */}
           {onClose && (
             <button
+              type="button"
               onClick={onClose}
               title="Close chat"
-              className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition-colors cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-white"
+              style={{ color: headerTextColor }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = tokens.headerHoverBg)}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+              className="w-9 h-9 rounded-lg flex items-center justify-center transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
               aria-label="Close Sales Manager"
             >
               <X className="w-4 h-4" />
@@ -1583,9 +1795,14 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
             initial={{ opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}
-            className="bg-neutral-900 border-b border-neutral-800 px-3 py-1.5 flex items-center justify-center text-white text-[10px] font-mono gap-1.5 shrink-0"
+            style={{
+              backgroundColor: tokens.bannerBg,
+              borderBottomColor: tokens.bannerBorder,
+              color: tokens.bannerText,
+            }}
+            className="border-b px-3 py-1.5 flex items-center justify-center text-[11px] font-medium gap-1.5 shrink-0"
           >
-            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
             <span>{syncNotice}</span>
           </motion.div>
         )}
@@ -1593,10 +1810,17 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
 
       {/* Human Handoff Banner */}
       {humanHandoffRequested && (
-        <div className="bg-neutral-900 border-b border-neutral-800 px-3.5 py-2 flex items-center justify-between text-neutral-300 text-[11px] shrink-0">
+        <div
+          style={{
+            backgroundColor: tokens.bannerBg,
+            borderBottomColor: tokens.bannerBorder,
+            color: tokens.bannerText,
+          }}
+          className="border-b px-3.5 py-2 flex items-center justify-between text-[11px] shrink-0"
+        >
           <div className="flex items-center space-x-2">
-            <UserCheck className="w-3.5 h-3.5 flex-shrink-0 text-sky-400" />
-            <span>Human handoff active. Inbound brief prepared for executive review.</span>
+            <UserCheck className="w-3.5 h-3.5 flex-shrink-0 text-blue-500" />
+            <span>Human handoff active. Inbound brief prepared for team review.</span>
           </div>
         </div>
       )}
@@ -1605,13 +1829,21 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="flex-1 min-h-0 p-3.5 overflow-y-auto space-y-3 relative bg-[#070709]"
+        style={{ backgroundColor: tokens.viewportBg }}
+        className="flex-1 min-h-0 px-3.5 py-4 overflow-y-auto space-y-3.5 relative transition-colors"
       >
         {/* Subtle Memory Indicator for Returning Visitors */}
         {hasRestoredPriorHistory && (
           <div className="flex items-center justify-center my-1">
-            <span className="text-[10px] font-mono text-neutral-400 bg-neutral-900/80 px-2.5 py-0.5 rounded-full border border-neutral-800 flex items-center gap-1">
-              <Sparkles className="w-2.5 h-2.5 text-neutral-300" />
+            <span
+              style={{
+                backgroundColor: tokens.bannerBg,
+                color: tokens.timestampText,
+                borderColor: tokens.bannerBorder,
+              }}
+              className="text-[10px] font-medium px-2.5 py-0.5 rounded-full border flex items-center gap-1"
+            >
+              <Sparkles className="w-2.5 h-2.5" />
               <span>Prior conversation restored</span>
             </span>
           </div>
@@ -1624,47 +1856,44 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
           const isStreamingThisMsg = streamingMsgId === m.id;
           const textToRender = isStreamingThisMsg ? displayedStreamingText : m.text;
 
-          const isBubbleLight = isCustomer ? isColorLight(resolvedUserMsgBg) : isColorLight(resolvedAiMsgBg);
           const currentBubbleBg = isCustomer ? resolvedUserMsgBg : resolvedAiMsgBg;
           const currentBubbleText = isCustomer ? resolvedUserMsgText : resolvedAiMsgText;
+          const isBubbleLight = isColorLight(currentBubbleBg);
 
           return (
             <motion.div
-              key={m.id}
+              key={m.id || m.message_id}
               initial={{ opacity: 0, y: 3 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.12, ease: 'easeOut' }}
+              transition={{ duration: 0.14, ease: 'easeOut' }}
               className={`flex flex-col ${isCustomer ? 'items-end' : 'items-start'}`}
             >
               <div
                 style={{
                   backgroundColor: currentBubbleBg,
                   color: currentBubbleText,
-                  borderRadius: isCustomer ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
-                  ['--msg-strong' as any]: isBubbleLight ? '#090d16' : '#ffffff',
-                  ['--msg-heading' as any]: isBubbleLight ? '#090d16' : '#ffffff',
-                  ['--msg-link' as any]: isBubbleLight ? '#0284c7' : '#38bdf8',
+                  borderColor: isCustomer ? 'transparent' : tokens.aiBubbleBorder,
+                  borderRadius: isCustomer ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+                  ['--msg-strong' as any]: isBubbleLight ? '#0F172A' : '#FFFFFF',
+                  ['--msg-heading' as any]: isBubbleLight ? '#0F172A' : '#FFFFFF',
+                  ['--msg-link' as any]: isBubbleLight ? '#1D4ED8' : '#60A5FA',
                   ['--msg-code-bg' as any]: isBubbleLight ? 'rgba(15, 23, 42, 0.08)' : 'rgba(255, 255, 255, 0.12)',
-                  ['--msg-code-fg' as any]: isBubbleLight ? '#090d16' : '#f8fafc',
+                  ['--msg-code-fg' as any]: isBubbleLight ? '#0F172A' : '#F8FAFC',
                 }}
-                className={`max-w-[88%] text-xs px-3.5 py-2.5 leading-relaxed border transition-colors aiw-formatted-message ${
-                  isCustomer
-                    ? 'border-transparent font-medium'
-                    : isBubbleLight
-                    ? 'border-slate-200/90 shadow-xs'
-                    : 'border-neutral-800/90 shadow-xs'
+                className={`max-w-[86%] text-[13px] px-3.5 py-2.5 leading-relaxed border shadow-2xs transition-colors aiw-formatted-message ${
+                  isCustomer ? 'font-medium' : ''
                 }`}
               >
                 {renderFormattedMessageText(textToRender, isBubbleLight, currentBubbleText)}
                 {isStreamingThisMsg && (
                   <span
-                    style={{ backgroundColor: isBubbleLight ? '#0f172a' : '#ffffff' }}
-                    className="inline-block w-1.5 h-3 animate-pulse ml-0.5 align-middle"
+                    style={{ backgroundColor: isBubbleLight ? '#0F172A' : '#FFFFFF' }}
+                    className="inline-block w-1.5 h-3.5 animate-pulse ml-1 align-middle rounded-xs"
                   />
                 )}
               </div>
 
-              <span className="text-[9px] text-neutral-500 px-1 mt-0.5 font-mono">
+              <span style={{ color: tokens.timestampText }} className="text-[10px] px-1 mt-1 font-normal">
                 {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </span>
 
@@ -1672,15 +1901,21 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
               {isLatestAssistant && !isTyping && !isStreamingThisMsg && m.options && m.options.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5 max-w-[95%]">
                   {m.options.slice(0, 3).map((opt) => (
-                    <motion.button
+                    <button
                       key={opt}
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
+                      type="button"
                       onClick={() => handleOptionClick(opt)}
-                      className="text-[11px] px-2.5 py-1 text-left transition-all cursor-pointer font-medium rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 hover:border-neutral-700 shadow-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-white"
+                      style={{
+                        backgroundColor: tokens.chipBg,
+                        color: tokens.chipText,
+                        borderColor: tokens.chipBorder,
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = tokens.chipHoverBg)}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = tokens.chipBg)}
+                      className="text-[11px] px-3 py-1.5 text-left transition-colors cursor-pointer font-medium rounded-lg border shadow-2xs focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                     >
                       {opt}
-                    </motion.button>
+                    </button>
                   ))}
                 </div>
               )}
@@ -1691,16 +1926,23 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
         {/* Typing indicator */}
         {isTyping && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
+            initial={{ opacity: 0, scale: 0.96 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0 }}
             className="flex items-center space-x-2"
           >
-            <div className="px-3.5 py-2 rounded-[12px_12px_12px_2px] border bg-[#141418] border-neutral-800 text-neutral-300">
-              <div className="flex space-x-1.5 items-center h-2.5">
-                <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-bounce [animation-duration:0.8s]" />
-                <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-bounce [animation-duration:0.8s] [animation-delay:0.15s]" />
-                <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-bounce [animation-duration:0.8s] [animation-delay:0.3s]" />
+            <div
+              style={{
+                backgroundColor: tokens.aiBubbleBg,
+                borderColor: tokens.aiBubbleBorder,
+                color: tokens.aiBubbleText,
+              }}
+              className="px-3.5 py-2.5 rounded-[16px_16px_16px_4px] border shadow-2xs"
+            >
+              <div className="flex space-x-1.5 items-center h-3">
+                <span style={{ backgroundColor: tokens.timestampText }} className="w-1.5 h-1.5 rounded-full animate-bounce [animation-duration:0.8s]" />
+                <span style={{ backgroundColor: tokens.timestampText }} className="w-1.5 h-1.5 rounded-full animate-bounce [animation-duration:0.8s] [animation-delay:0.15s]" />
+                <span style={{ backgroundColor: tokens.timestampText }} className="w-1.5 h-1.5 rounded-full animate-bounce [animation-duration:0.8s] [animation-delay:0.3s]" />
               </div>
             </div>
           </motion.div>
@@ -1711,17 +1953,22 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
           <motion.div
             initial={{ opacity: 0, y: 3 }}
             animate={{ opacity: 1, y: 0 }}
-            className="p-2.5 rounded-xl bg-red-950/40 border border-red-900/50 flex items-center justify-between text-red-300 text-xs"
+            className={`p-2.5 rounded-xl border flex items-center justify-between text-xs ${
+              isLightBg
+                ? 'bg-red-50 border-red-200 text-red-800'
+                : 'bg-red-950/50 border-red-900/60 text-red-200'
+            }`}
           >
             <div className="flex items-center space-x-2">
-              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 text-red-400" />
+              <AlertCircle className="w-4 h-4 flex-shrink-0 text-red-500" />
               <span>Could not send message.</span>
             </div>
             <button
+              type="button"
               onClick={handleRetry}
-              className="flex items-center space-x-1 px-2 py-0.5 rounded-md bg-red-600 hover:bg-red-700 text-white font-medium text-[10px] transition-colors cursor-pointer"
+              className="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold text-[11px] transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
             >
-              <RotateCcw className="w-2.5 h-2.5" />
+              <RotateCcw className="w-3 h-3" />
               <span>Retry</span>
             </button>
           </motion.div>
@@ -1732,11 +1979,16 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
         {/* Floating "New Message ↓" Scroll Badge */}
         {hasUnreadBelow && (
           <motion.button
+            type="button"
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 6 }}
             onClick={() => scrollToBottom(true)}
-            className="sticky bottom-2 left-1/2 -translate-x-1/2 px-2.5 py-1 rounded-full bg-white text-black text-[10px] font-semibold shadow-lg flex items-center space-x-1 hover:scale-105 transition-transform cursor-pointer z-10"
+            style={{
+              backgroundColor: tokens.sendBtnBg,
+              color: tokens.sendBtnText,
+            }}
+            className="sticky bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-[11px] font-semibold shadow-lg flex items-center space-x-1 hover:scale-105 transition-transform cursor-pointer z-10"
           >
             <span>New message</span>
             <ArrowDown className="w-3 h-3" />
@@ -1744,12 +1996,15 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
         )}
       </div>
 
-      {/* Message Composer - Compact & Responsive */}
+      {/* Message Composer - Apple x ChatGPT Clean Composer */}
       <form
         onSubmit={handleSendMessage}
-        className="p-2.5 bg-black border-t border-neutral-800 flex flex-col space-y-2 shrink-0 z-20"
+        style={{
+          backgroundColor: tokens.composerBg,
+          borderTopColor: tokens.composerBorder,
+        }}
+        className="p-3 border-t flex flex-col space-y-2 shrink-0 z-20 transition-colors"
       >
-
         {/* Active Speech Recording Banner */}
         <AnimatePresence>
           {isListening && (
@@ -1757,16 +2012,16 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
               initial={{ opacity: 0, y: 2 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 2 }}
-              className="flex items-center justify-between px-2.5 py-1 rounded-md bg-red-500/10 border border-red-500/30 text-red-400 text-[10px] font-medium animate-pulse"
+              className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-500 text-[11px] font-medium"
             >
               <div className="flex items-center space-x-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
                 <span>Listening... Speak clearly</span>
               </div>
               <button
                 type="button"
                 onClick={toggleVoiceInput}
-                className="text-[9px] underline hover:text-red-300 cursor-pointer font-bold uppercase tracking-wider"
+                className="text-[10px] underline hover:opacity-80 cursor-pointer font-bold uppercase tracking-wider"
               >
                 Done
               </button>
@@ -1778,13 +2033,19 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
               initial={{ opacity: 0, y: 2 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 2 }}
-              className="flex items-center justify-between px-2.5 py-1 rounded-md bg-neutral-900 border border-neutral-800 text-neutral-300 text-[10px] leading-tight"
+              style={{
+                backgroundColor: tokens.bannerBg,
+                borderColor: tokens.bannerBorder,
+                color: tokens.bannerText,
+              }}
+              className="flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-[11px] leading-tight"
             >
               <span>{voiceNotice}</span>
               <button
                 type="button"
                 onClick={() => setVoiceNotice(null)}
-                className="ml-2 text-neutral-400 hover:text-white font-bold"
+                className="ml-2 font-bold opacity-75 hover:opacity-100"
+                aria-label="Dismiss voice notice"
               >
                 ×
               </button>
@@ -1792,7 +2053,7 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
           )}
         </AnimatePresence>
 
-        <div className="flex items-end space-x-1.5">
+        <div className="flex items-end space-x-2">
           <textarea
             ref={textareaRef}
             rows={1}
@@ -1800,8 +2061,14 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             placeholder={isListening ? 'Listening...' : 'Ask Alpha anything...'}
+            aria-label="Message Alpha"
             disabled={isTyping}
-            className="flex-1 bg-neutral-900 text-white placeholder:text-neutral-500 text-xs px-3 py-2 rounded-lg border border-neutral-800 focus:outline-none focus:border-neutral-600 transition-all resize-none max-h-24 overflow-y-auto leading-relaxed"
+            style={{
+              backgroundColor: tokens.inputBg,
+              color: tokens.inputText,
+              borderColor: tokens.inputBorder,
+            }}
+            className="flex-1 min-h-[40px] text-[13px] px-3.5 py-2.5 rounded-xl border focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-all resize-none max-h-24 overflow-y-auto leading-snug"
           />
 
           {/* Voice to Text Button */}
@@ -1810,17 +2077,23 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
               type="button"
               onClick={toggleVoiceInput}
               title={isListening ? 'Stop recording voice' : 'Speak message (Voice-to-Text)'}
+              aria-label={isListening ? 'Stop recording voice' : 'Start voice input'}
               disabled={isTyping}
-              className={`p-2 rounded-lg font-medium transition-all flex-shrink-0 cursor-pointer ${
+              style={!isListening ? {
+                backgroundColor: tokens.inputBg,
+                color: tokens.inputText,
+                borderColor: tokens.inputBorder,
+              } : undefined}
+              className={`min-w-[40px] min-h-[40px] w-10 h-10 rounded-xl font-medium transition-all flex items-center justify-center flex-shrink-0 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                 isListening
                   ? 'bg-red-600 text-white ring-2 ring-red-400 animate-pulse'
-                  : 'bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-neutral-800'
+                  : 'border hover:opacity-85'
               }`}
             >
               {isListening ? (
-                <MicOff className="w-3.5 h-3.5 text-white" />
+                <MicOff className="w-4 h-4 text-white" />
               ) : (
-                <Mic className="w-3.5 h-3.5" />
+                <Mic className="w-4 h-4" />
               )}
             </button>
           )}
@@ -1829,13 +2102,26 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
           <button
             type="submit"
             disabled={!inputText.trim() || isTyping}
-            className={`p-2 rounded-lg font-medium transition-all flex-shrink-0 ${
+            aria-label="Send message"
+            style={
               inputText.trim() && !isTyping
-                ? 'bg-[#FFD000] text-black hover:bg-[#FFE36A] active:scale-95 shadow-[0_0_12px_rgba(255,208,0,0.35)] cursor-pointer font-bold'
-                : 'bg-neutral-900 text-neutral-600 border border-neutral-800/80 cursor-not-allowed'
+                ? {
+                    backgroundColor: tokens.sendBtnBg,
+                    color: tokens.sendBtnText,
+                  }
+                : {
+                    backgroundColor: tokens.inputBg,
+                    color: tokens.inputPlaceholder,
+                    borderColor: tokens.inputBorder,
+                  }
+            }
+            className={`min-w-[40px] min-h-[40px] w-10 h-10 rounded-xl font-medium transition-all flex items-center justify-center flex-shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+              inputText.trim() && !isTyping
+                ? 'hover:opacity-90 active:scale-95 shadow-sm cursor-pointer'
+                : 'border cursor-not-allowed opacity-60'
             }`}
           >
-            <Send className="w-3.5 h-3.5" />
+            <Send className="w-4 h-4" />
           </button>
         </div>
       </form>
@@ -1844,23 +2130,23 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
       {!hideAttributionFooter && (
         <div
           style={{
-            backgroundColor: isLightBg ? 'rgba(255, 255, 255, 0.95)' : 'rgba(8, 8, 8, 0.95)',
-            borderTopColor: isLightBg ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)',
+            backgroundColor: tokens.footerBg,
+            borderTopColor: tokens.footerBorder,
           }}
-          className="py-1.5 px-3 border-t text-center text-[10px] font-mono tracking-wider select-none shrink-0 flex items-center justify-center z-20 transition-colors"
+          className="py-1.5 px-3 border-t text-center text-[10px] tracking-wide select-none shrink-0 flex items-center justify-center z-20 transition-colors"
         >
           <a
             href="https://aiworkforce.ai.studio/"
             target="_blank"
             rel="noopener noreferrer"
             style={{
-              color: isLightBg ? '#686868' : '#A3A3A3',
+              color: tokens.footerText,
               textDecoration: 'none',
             }}
-            className="hover:text-[#FFD000] transition-colors inline-flex items-center gap-1 font-semibold uppercase tracking-wider"
+            className="hover:opacity-100 transition-opacity inline-flex items-center gap-1 font-medium"
           >
-            <span>POWERED BY AI WORKFORCE</span>
-            <span className="text-[9px] leading-none text-[#FFD000]">↗</span>
+            <span>Powered by AI Workforce</span>
+            <span className="text-[10px] leading-none font-semibold">↗</span>
           </a>
         </div>
       )}

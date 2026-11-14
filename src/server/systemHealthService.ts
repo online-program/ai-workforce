@@ -234,6 +234,10 @@ export async function runSystemDiagnostics(): Promise<SystemHealthReport> {
   }
 
   const secretConfigured = isVisitorSessionSecretConfigured();
+  const isProd = process.env.NODE_ENV === 'production';
+  if (isProd && !secretConfigured) {
+    widgetStatus = 'CRITICAL';
+  }
   subsystems.push({
     name: 'Embed Widget Delivery Runtime',
     key: 'widget_runtime',
@@ -242,7 +246,9 @@ export async function runSystemDiagnostics(): Promise<SystemHealthReport> {
     lastCheckedAt: now,
     message: secretConfigured
       ? widgetMessage
-      : `${widgetMessage} Visitor session tokens use a per-boot ephemeral secret (set VISITOR_SESSION_SECRET for cross-restart persistence).`,
+      : isProd
+      ? `${widgetMessage} CRITICAL: VISITOR_SESSION_SECRET (>= 32 chars) is missing in production; visitor session tokens cannot be signed or verified.`
+      : `${widgetMessage} Dev/test mode: visitor session tokens use ephemeral local secret (set VISITOR_SESSION_SECRET for production).`,
     details: {
       activeWidgets: widgetCount,
       visitorSessionSecretConfigured: secretConfigured,

@@ -509,31 +509,29 @@ describe('Phase 8A — Security & Tenant Isolation Tests', () => {
     assert.match(embedSrc, /x-visitor-token/);
   });
 
-  it('handles visitorSessionService secret configuration cleanly in test and production modes', () => {
+  it('fails closed in production without >=32 char VISITOR_SESSION_SECRET and rejects cross-instance secret mismatch', () => {
     const prevNodeEnv = process.env.NODE_ENV;
     const prevSecret = process.env.VISITOR_SESSION_SECRET;
     try {
       delete process.env.VISITOR_SESSION_SECRET;
       assert.equal(isVisitorSessionSecretConfigured(), false);
 
-      // Even when NODE_ENV=production without VISITOR_SESSION_SECRET, per-boot fallback issues & verifies tokens cleanly
+      // In production without VISITOR_SESSION_SECRET, token signing MUST fail closed (no silent ephemeral secret)
       process.env.NODE_ENV = 'production';
-      const tok = issueVisitorSessionToken({
-        tenant_id: 'tenant_prod_1',
-        widget_id: 'wgt_prod_1',
-        visitor_id: 'vis_prod_1',
-        conversation_id: 'conv_prod_1',
-      });
-      const verified = verifyVisitorSessionToken(tok, {
-        tenant_id: 'tenant_prod_1',
-        widget_id: 'wgt_prod_1',
-        visitor_id: 'vis_prod_1',
-        conversation_id: 'conv_prod_1',
-      });
-      assert.equal(verified.valid, true);
+      assert.throws(
+        () =>
+          issueVisitorSessionToken({
+            tenant_id: 'tenant_prod_1',
+            widget_id: 'wgt_prod_1',
+            visitor_id: 'vis_prod_1',
+            conversation_id: 'conv_prod_1',
+          }),
+        /VISITOR_SESSION_SECRET/
+      );
 
-      // Explicitly short VISITOR_SESSION_SECRET (<32 chars) in production is rejected
+      // Explicitly short VISITOR_SESSION_SECRET (<32 chars) in production is also rejected
       process.env.VISITOR_SESSION_SECRET = 'too-short-secret';
+      assert.equal(isVisitorSessionSecretConfigured(), false);
       assert.throws(() =>
         issueVisitorSessionToken({
           tenant_id: 'tenant_prod_1',
@@ -542,9 +540,37 @@ describe('Phase 8A — Security & Tenant Isolation Tests', () => {
         })
       );
 
-      // Valid >=32-char secret passes configuration check
+      // Valid >=32-char secret passes configuration & issues/verifies deterministically
       process.env.VISITOR_SESSION_SECRET = '0123456789abcdef0123456789abcdef_prod';
       assert.equal(isVisitorSessionSecretConfigured(), true);
+      const tok = issueVisitorSessionToken({
+        tenant_id: 'tenant_prod_1',
+        widget_id: 'wgt_prod_1',
+        visitor_id: 'vis_prod_1',
+        conversation_id: 'conv_prod_1',
+      });
+      const verifiedSame = verifyVisitorSessionToken(tok, {
+        tenant_id: 'tenant_prod_1',
+        widget_id: 'wgt_prod_1',
+        visitor_id: 'vis_prod_1',
+        conversation_id: 'conv_prod_1',
+      });
+      assert.equal(verifiedSame.valid, true);
+
+      // Different instance secret fails signature verification cleanly (fail closed)
+      const verifiedOtherInstance = verifyVisitorSessionToken(tok, {
+        tenant_id: 'tenant_prod_1',
+        widget_id: 'wgt_prod_1',
+        visitor_id: 'vis_prod_1',
+        conversation_id: 'conv_prod_1',
+        secretOverride: 'different-instance-secret-0123456789abcdef',
+      });
+      assert.equal(verifiedOtherInstance.valid, false);
+      assert.equal(verifiedOtherInstance.code, 'TOKEN_INVALID_SIGNATURE');
+
+      // Widget UI must contain zero legacy #FFD000 / #FFE36A yellow button styling
+      const widgetSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/CustomerChatWidget.tsx'), 'utf8');
+      assert.doesNotMatch(widgetSrc, /FFD000|FFE36A/i);
     } finally {
       process.env.NODE_ENV = prevNodeEnv;
       if (prevSecret === undefined) delete process.env.VISITOR_SESSION_SECRET;

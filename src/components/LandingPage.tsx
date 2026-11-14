@@ -97,13 +97,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Fetch official platform widget configuration via public projection endpoint
+  // Fetch official platform widget configuration via public projection endpoint (strictly verified as AI Workforce)
   useEffect(() => {
     let active = true;
     fetch('/api/widget/config?widget_id=official-ai-workforce')
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (active && data?.widget) {
+        if (
+          active &&
+          data?.widget &&
+          data.widget.widget_id === 'official-ai-workforce' &&
+          data.widget.business_name === 'AI Workforce'
+        ) {
           setLiveWidgetConfig(data.widget);
         }
       })
@@ -1129,30 +1134,29 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       <div className="fixed bottom-6 right-6 z-50">
         {!isRealWidgetOpen ? (
           <WidgetLauncherButton
-            launcherType={liveWidgetConfig?.launcherType || 'ai_workforce'}
-            logoUrl={liveWidgetConfig?.logoUrl}
-            primaryColor={liveWidgetConfig?.primaryColor || liveWidgetConfig?.theme_color || '#000000'}
-            secondaryColor={liveWidgetConfig?.secondaryColor || '#FFFFFF'}
-            gradientEnabled={liveWidgetConfig?.gradientEnabled ?? false}
-            gradientType={liveWidgetConfig?.gradientType || 'custom'}
-            gradientColor1={liveWidgetConfig?.gradientColor1 || '#000000'}
-            gradientColor2={liveWidgetConfig?.gradientColor2 || '#171717'}
-            gradientAngle={liveWidgetConfig?.gradientAngle || 135}
-            launcherSize={liveWidgetConfig?.launcherSize || 'medium'}
-            launcherShape={liveWidgetConfig?.launcherShape || 'circle'}
-            borderRadius={liveWidgetConfig?.borderRadius ?? 20}
-            shadowIntensity={liveWidgetConfig?.shadowIntensity || 'deep'}
-            glowIntensity={liveWidgetConfig?.glowIntensity || 'subtle'}
-            mode={liveWidgetConfig?.mode || 'attractive_3d'}
+            launcherType="ai_workforce"
+            primaryColor="#09090B"
+            secondaryColor="#27272A"
+            gradientEnabled={true}
+            gradientType="custom"
+            gradientColor1="#18181B"
+            gradientColor2="#09090B"
+            gradientAngle={135}
+            launcherSize="medium"
+            launcherShape="circle"
+            borderRadius={20}
+            shadowIntensity="deep"
+            glowIntensity="none"
+            mode="attractive_3d"
             isOpen={false}
             onClick={() => setIsRealWidgetOpen(true)}
           />
         ) : (
           <div
             style={{
-              borderRadius: liveWidgetConfig?.borderRadius !== undefined ? `${liveWidgetConfig.borderRadius}px` : '20px',
+              borderRadius: '20px',
             }}
-            className="w-[calc(100vw-32px)] sm:w-[380px] h-[min(540px,calc(100dvh-100px))] max-h-[560px] rounded-2xl overflow-hidden shadow-2xl border border-white/20 bg-[#000000]"
+            className="w-[calc(100vw-32px)] sm:w-[380px] h-[min(540px,calc(100dvh-100px))] max-h-[560px] rounded-2xl overflow-hidden shadow-2xl border border-white/20 bg-[#09090B]"
           >
             <CustomerChatWidget
               widgetId="official-ai-workforce"
@@ -1160,39 +1164,28 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               isOpen={true}
               onClose={() => setIsRealWidgetOpen(false)}
               userId={undefined}
-              businessName={liveWidgetConfig?.business_name || AI_WORKFORCE_PROFILE.name}
+              businessName="AI Workforce"
               welcomeMessage={
                 liveWidgetConfig?.welcome_message ||
                 "Welcome! I am Alpha, your AI Sales Manager. Ask me anything about deploying autonomous AI employees for your business."
               }
-              {...(liveWidgetConfig
-                ? {
-                    mode: liveWidgetConfig.mode || liveWidgetConfig.design_style || 'attractive_3d',
-                    primaryColor: liveWidgetConfig.primaryColor || liveWidgetConfig.theme_color || '#000000',
-                    secondaryColor: liveWidgetConfig.secondaryColor || '#FFFFFF',
-                    backgroundColor: liveWidgetConfig.backgroundColor || '#09090B',
-                    textColor: liveWidgetConfig.textColor || '#FFFFFF',
-                    aiMessageColor: liveWidgetConfig.aiMessageColor || '#18181B',
-                    aiMessageTextColor: liveWidgetConfig.aiMessageTextColor || '#FFFFFF',
-                    userMessageColor: liveWidgetConfig.userMessageColor || '#FFFFFF',
-                    userMessageTextColor: liveWidgetConfig.userMessageTextColor || '#000000',
-                    gradientEnabled: false,
-                    gradientType: 'custom',
-                    gradientColor1: '#000000',
-                    gradientColor2: '#111111',
-                    gradientAngle: 135,
-                    borderRadius: liveWidgetConfig.borderRadius ?? 20,
-                    shadowIntensity: 'deep',
-                    glowIntensity: 'subtle',
-                    animationIntensity: 'subtle',
-                    launcherType: liveWidgetConfig.launcherType || 'ai_workforce',
-                    logoUrl: liveWidgetConfig.logoUrl,
-                    studioConfig: liveWidgetConfig.studioConfig || liveWidgetConfig,
-                  }
-                : {
-                    themeColor: '#000000',
-                    design_style: 'attractive_3d',
-                  })}
+              mode="attractive_3d"
+              themeMode="dark"
+              primaryColor="#09090B"
+              secondaryColor="#FFFFFF"
+              backgroundColor="#09090B"
+              textColor="#F4F4F5"
+              aiMessageColor="#18181B"
+              aiMessageTextColor="#F4F4F5"
+              userMessageColor="#FFFFFF"
+              userMessageTextColor="#09090B"
+              gradientEnabled={false}
+              gradientType="none"
+              borderRadius={20}
+              shadowIntensity="deep"
+              glowIntensity="none"
+              animationIntensity="subtle"
+              launcherType="ai_workforce"
             />
           </div>
         )}

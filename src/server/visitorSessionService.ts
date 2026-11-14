@@ -23,34 +23,37 @@ export interface VisitorTokenVerificationResult {
 }
 
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const EPHEMERAL_FALLBACK_SECRET = crypto.randomBytes(32).toString('hex');
-let warnedMissingProdSecret = false;
+const DEV_EPHEMERAL_SECRET = crypto.randomBytes(32).toString('hex');
 
 export function isVisitorSessionSecretConfigured(): boolean {
   const configured = (process.env.VISITOR_SESSION_SECRET || process.env.SESSION_SECRET || '').trim();
   return configured.length >= 32;
 }
 
-function getSigningSecret(): string {
-  const configured = (process.env.VISITOR_SESSION_SECRET || process.env.SESSION_SECRET || '').trim();
+function getSigningSecret(secretOverride?: string): string {
+  const configured = (
+    secretOverride !== undefined
+      ? secretOverride
+      : process.env.VISITOR_SESSION_SECRET || process.env.SESSION_SECRET || ''
+  ).trim();
+
   if (process.env.NODE_ENV === 'production') {
-    if (configured.length > 0 && configured.length < 32) {
+    if (!configured || configured.length < 32) {
       throw new Error(
-        '[SECURITY] Configured VISITOR_SESSION_SECRET must be at least 32 characters in production.'
+        '[SECURITY] VISITOR_SESSION_SECRET (or SESSION_SECRET) must be configured with at least 32 characters in production.'
       );
-    }
-    if (!configured) {
-      if (!warnedMissingProdSecret) {
-        warnedMissingProdSecret = true;
-        console.warn(
-          '[SECURITY WARNING] VISITOR_SESSION_SECRET is unset in production. Using a cryptographically random per-boot signing secret; set VISITOR_SESSION_SECRET (32+ chars) for session persistence across restarts.'
-        );
-      }
-      return EPHEMERAL_FALLBACK_SECRET;
     }
     return configured;
   }
-  return configured || process.env.FIREBASE_PRIVATE_KEY || EPHEMERAL_FALLBACK_SECRET;
+
+  if (secretOverride !== undefined) {
+    if (configured.length < 32) {
+      throw new Error('[SECURITY] Secret override must be at least 32 characters.');
+    }
+    return configured;
+  }
+
+  return configured || process.env.FIREBASE_PRIVATE_KEY || DEV_EPHEMERAL_SECRET;
 }
 
 function base64UrlEncode(input: string | Buffer): string {
@@ -72,7 +75,9 @@ export function issueVisitorSessionToken(params: {
   visitor_id: string;
   conversation_id: string;
   ttlMs?: number;
+  secretOverride?: string;
 }): string {
+  const secret = getSigningSecret(params.secretOverride);
   const now = Date.now();
   const payload: VisitorSessionPayload = {
     tenant_id: params.tenant_id,
@@ -85,7 +90,7 @@ export function issueVisitorSessionToken(params: {
   };
 
   const payloadB64 = base64UrlEncode(JSON.stringify(payload));
-  const sig = crypto.createHmac('sha256', getSigningSecret()).update(payloadB64).digest();
+  const sig = crypto.createHmac('sha256', secret).update(payloadB64).digest();
   const sigB64 = base64UrlEncode(sig);
   return `${payloadB64}.${sigB64}`;
 }
@@ -97,10 +102,22 @@ export function verifyVisitorSessionToken(
     widget_id?: string;
     visitor_id?: string;
     conversation_id?: string;
+    secretOverride?: string;
   }
 ): VisitorTokenVerificationResult {
   if (!token || typeof token !== 'string' || !token.trim()) {
     return { valid: false, code: 'TOKEN_MISSING', error: 'Visitor session token is required.' };
+  }
+
+  let secret: string;
+  try {
+    secret = getSigningSecret(expected?.secretOverride);
+  } catch (err: any) {
+    return {
+      valid: false,
+      code: 'TOKEN_INVALID_SIGNATURE',
+      error: err?.message || 'Session signing secret is not configured.',
+    };
   }
 
   const parts = token.trim().split('.');
@@ -109,7 +126,7 @@ export function verifyVisitorSessionToken(
   }
 
   const [payloadB64, sigB64] = parts;
-  const expectedSig = crypto.createHmac('sha256', getSigningSecret()).update(payloadB64).digest();
+  const expectedSig = crypto.createHmac('sha256', secret).update(payloadB64).digest();
   const expectedSigB64 = base64UrlEncode(expectedSig);
 
   const sigBuf = Buffer.from(sigB64, 'utf8');

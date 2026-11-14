@@ -26,6 +26,7 @@ import {
   InquiryLead,
   WidgetStudioConfig,
   WidgetVisualMode,
+  WidgetThemeMode,
   WidgetLauncherType,
   WidgetLauncherShape,
   WidgetLauncherSize,
@@ -41,6 +42,7 @@ import {
   calculateContrastRatio,
   getAccessibleTextColor,
   sanitizeWidgetStudioConfig,
+  sanitizeSafeUrl,
   defaultStudioConfig,
 } from '../utils/widgetDesignUtils.ts';
 import { generateWidgetEmbedSnippet } from '../utils/widgetUrl.ts';
@@ -66,26 +68,27 @@ export const WidgetStudio: React.FC<WidgetStudioProps> = ({
   const [studioConfig, setStudioConfig] = useState<WidgetStudioConfig>(() => {
     const raw: Partial<WidgetStudioConfig> = {
       mode: (initialConfig.design_style as WidgetVisualMode) || 'attractive_3d',
+      themeMode: initialConfig.themeMode || 'light',
       launcherType: initialConfig.launcherType || 'ai_workforce',
       logoUrl: initialConfig.logoUrl || '',
-      primaryColor: initialConfig.theme_color || '#0f172a',
-      secondaryColor: initialConfig.secondaryColor || '#3b82f6',
-      backgroundColor: initialConfig.backgroundColor || '#ffffff',
-      textColor: initialConfig.textColor || '#0f172a',
-      aiMessageColor: initialConfig.aiMessageColor || '#f1f5f9',
-      aiMessageTextColor: initialConfig.aiMessageTextColor || '#0f172a',
-      userMessageColor: initialConfig.userMessageColor || initialConfig.theme_color || '#0f172a',
-      userMessageTextColor: initialConfig.userMessageTextColor || '#ffffff',
+      primaryColor: initialConfig.theme_color || '#0F172A',
+      secondaryColor: initialConfig.secondaryColor || '#2563EB',
+      backgroundColor: initialConfig.backgroundColor || '#FFFFFF',
+      textColor: initialConfig.textColor || '#0F172A',
+      aiMessageColor: initialConfig.aiMessageColor || '#F1F5F9',
+      aiMessageTextColor: initialConfig.aiMessageTextColor || '#0F172A',
+      userMessageColor: initialConfig.userMessageColor || initialConfig.theme_color || '#0F172A',
+      userMessageTextColor: initialConfig.userMessageTextColor || '#FFFFFF',
       gradientEnabled: initialConfig.gradientEnabled ?? false,
       gradientType: initialConfig.gradientType || 'none',
-      gradientColor1: initialConfig.gradientColor1 || initialConfig.theme_color || '#0f172a',
-      gradientColor2: initialConfig.gradientColor2 || '#1e293b',
+      gradientColor1: initialConfig.gradientColor1 || initialConfig.theme_color || '#0F172A',
+      gradientColor2: initialConfig.gradientColor2 || '#1E293B',
       gradientAngle: initialConfig.gradientAngle ?? 135,
       launcherSize: initialConfig.launcherSize || 'medium',
       launcherShape: initialConfig.launcherShape || 'circle',
       borderRadius: initialConfig.borderRadius ?? 20,
       shadowIntensity: initialConfig.shadowIntensity || 'medium',
-      glowIntensity: initialConfig.glowIntensity || 'subtle',
+      glowIntensity: initialConfig.glowIntensity || 'none',
       animationIntensity: initialConfig.animationIntensity || 'subtle',
       launcherPosition: (initialConfig.launcherPosition || initialConfig.position || 'bottom-right') as WidgetPosition,
       position: (initialConfig.position || initialConfig.launcherPosition || 'bottom-right') as WidgetPosition,
@@ -110,6 +113,7 @@ export const WidgetStudio: React.FC<WidgetStudioProps> = ({
         const merged = {
           ...prev,
           mode: (initialConfig.design_style as WidgetVisualMode) || prev.mode,
+          themeMode: initialConfig.themeMode || prev.themeMode || 'light',
           launcherType: initialConfig.launcherType || prev.launcherType,
           logoUrl: initialConfig.logoUrl ?? prev.logoUrl,
           primaryColor: initialConfig.theme_color || prev.primaryColor,
@@ -434,6 +438,49 @@ export const WidgetStudio: React.FC<WidgetStudioProps> = ({
                 </div>
               </div>
 
+              {/* Surface Theme Mode (Light / Dark / System) */}
+              <div className="pt-3 border-t border-slate-100 dark:border-neutral-800/80 space-y-2">
+                <label className="text-xs font-bold text-slate-800 dark:text-neutral-200 block">
+                  Surface Appearance Mode
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['light', 'dark', 'system'] as WidgetThemeMode[]).map((tm) => (
+                    <button
+                      key={tm}
+                      type="button"
+                      onClick={() =>
+                        setStudioConfig((p) => ({
+                          ...p,
+                          themeMode: tm,
+                          ...(tm === 'dark'
+                            ? {
+                                backgroundColor: '#0F172A',
+                                textColor: '#F8FAFC',
+                                aiMessageColor: '#1E293B',
+                                aiMessageTextColor: '#F8FAFC',
+                              }
+                            : tm === 'light'
+                            ? {
+                                backgroundColor: '#FFFFFF',
+                                textColor: '#0F172A',
+                                aiMessageColor: '#F1F5F9',
+                                aiMessageTextColor: '#0F172A',
+                              }
+                            : {}),
+                        }))
+                      }
+                      className={`py-2 text-xs rounded-xl border capitalize font-semibold transition-all cursor-pointer ${
+                        (studioConfig.themeMode || 'light') === tm
+                          ? 'border-slate-900 dark:border-white bg-slate-900 text-white dark:bg-white dark:text-black shadow-xs'
+                          : 'border-slate-200 dark:border-neutral-800 hover:border-slate-400 text-slate-700 dark:text-neutral-300'
+                      }`}
+                    >
+                      {tm === 'system' ? 'Auto (System)' : `${tm} Mode`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Business Name & Welcome Message */}
               <div className="pt-3 border-t border-slate-100 dark:border-neutral-800/80 space-y-3">
                 <div>
@@ -551,7 +598,7 @@ export const WidgetStudio: React.FC<WidgetStudioProps> = ({
               {(studioConfig.launcherType === 'custom_logo' || (studioConfig.launcherType as string) === 'logo') && (
                 <div className="p-3.5 bg-slate-50 dark:bg-neutral-900 rounded-xl border border-slate-200 dark:border-neutral-800 space-y-2">
                   <label className="text-xs font-bold text-slate-800 dark:text-neutral-200 block">
-                    Custom Logo Image URL
+                    Custom Logo Image URL (HTTPS)
                   </label>
                   <input
                     type="url"
@@ -560,9 +607,15 @@ export const WidgetStudio: React.FC<WidgetStudioProps> = ({
                     placeholder="https://example.com/brand-icon.png"
                     className="w-full text-xs px-3 py-2 rounded-xl bg-white dark:bg-black border border-slate-200 dark:border-neutral-800 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-slate-900"
                   />
-                  <p className="text-[11px] text-slate-500 dark:text-neutral-400">
-                    Transparent PNG or SVG square icon works best (at least 64x64px).
-                  </p>
+                  {studioConfig.logoUrl && !sanitizeSafeUrl(studioConfig.logoUrl) ? (
+                    <p className="text-[11px] text-rose-500 font-medium">
+                      URL must start with https:// or http:// (invalid schemes like javascript: or data: are blocked).
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-slate-500 dark:text-neutral-400">
+                      Transparent PNG or SVG square icon works best (at least 64x64px).
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -1095,6 +1148,7 @@ export const WidgetStudio: React.FC<WidgetStudioProps> = ({
                     onLeadAutoCreated={onLeadAutoCreated}
                     // Visual Studio Customizations passed directly
                     mode={studioConfig.mode}
+                    themeMode={studioConfig.themeMode}
                     launcherType={studioConfig.launcherType}
                     logoUrl={studioConfig.logoUrl}
                     primaryColor={studioConfig.primaryColor}

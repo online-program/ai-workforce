@@ -81,7 +81,7 @@ export function requireCeoRole() {
       recordSecurityEvent({
         type: 'UNAUTHORIZED_ACCESS',
         severity: 'HIGH',
-        sourceIp: (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || 'unknown',
+        sourceIp: req.ip || req.socket.remoteAddress || 'unknown',
         endpoint: req.path,
         details: { adminEmail: req.admin.email, adminRole: req.admin.role, message: 'Non-CEO admin attempted to access CEO intelligence center' },
       });
@@ -217,7 +217,7 @@ adminRouter.get('/auth/verify', requireAdminRole(), async (req: AuthenticatedAdm
     action: 'ADMIN_SESSION_VERIFIED',
     targetResource: 'ADMIN_CONTROL_CENTER',
     result: 'SUCCESS',
-    ipAddress: (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress,
+    ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
   });
 
   return res.json({
