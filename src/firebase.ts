@@ -10,6 +10,26 @@ try {
   // Ignored in environments where setLogLevel is not permitted
 }
 
+// Suppress noisy Firestore offline/connection warnings in sandbox environment
+if (typeof window !== 'undefined') {
+  const originalWarn = console.warn;
+  console.warn = (...args: any[]) => {
+    const msg = args.map(arg => String(arg)).join(' ');
+    if (msg.includes('Could not reach Cloud Firestore backend') || (msg.includes('Firestore') && msg.includes('offline'))) {
+      return;
+    }
+    originalWarn(...args);
+  };
+  const originalError = console.error;
+  console.error = (...args: any[]) => {
+    const msg = args.map(arg => String(arg)).join(' ');
+    if (msg.includes('Could not reach Cloud Firestore backend') || (msg.includes('Firestore') && msg.includes('offline mode'))) {
+      return;
+    }
+    originalError(...args);
+  };
+}
+
 // Initialize Firebase App instance safely
 export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
