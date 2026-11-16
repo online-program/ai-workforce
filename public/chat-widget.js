@@ -1025,7 +1025,7 @@
 
   function ensureVisitorToken(forceRefresh) {
     if (state.visitorToken && !forceRefresh) {
-      return Promise.resolve(state.visitorToken);
+      return Promise.resolve({ token: state.visitorToken, fatalError: null });
     }
     return fetch(hostOrigin + '/api/widget/session', {
       method: 'POST',
@@ -1037,21 +1037,33 @@
       }),
     })
       .then(function (res) {
-        if (!res.ok) return null;
-        return res.json();
-      })
-      .then(function (data) {
-        if (data && data.success && data.token) {
-          state.visitorToken = data.token;
-          try {
-            sessionStorage.setItem(tokenKey, data.token);
-          } catch (e) {}
-          return data.token;
-        }
-        return null;
+        return res
+          .json()
+          .catch(function () {
+            return {};
+          })
+          .then(function (data) {
+            if (!res.ok) {
+              if (res.status === 403 && data && data.code === 'UNAUTHORIZED_OWNERSHIP') {
+                return { token: null, ownershipConflict: true, fatalError: null };
+              }
+              if (res.status === 503 || (data && data.code === 'SESSION_SIGNING_UNCONFIGURED')) {
+                return { token: null, fatalError: (data && data.error) || 'Session signing unavailable' };
+              }
+              return { token: null, fatalError: null };
+            }
+            if (data && data.success && data.token) {
+              state.visitorToken = data.token;
+              try {
+                sessionStorage.setItem(tokenKey, data.token);
+              } catch (e) {}
+              return { token: data.token, fatalError: null };
+            }
+            return { token: null, fatalError: null };
+          });
       })
       .catch(function () {
-        return null;
+        return { token: null, fatalError: null };
       });
   }
 
@@ -1100,8 +1112,18 @@
     }
 
     ensureVisitorToken(false)
-      .then(function (token) {
-        return postChat(token);
+      .then(function (mintRes) {
+        if (mintRes && mintRes.ownershipConflict) {
+          rotateConversationId();
+          return ensureVisitorToken(true);
+        }
+        return mintRes;
+      })
+      .then(function (mintRes) {
+        if (mintRes && mintRes.fatalError) {
+          throw new Error(mintRes.fatalError);
+        }
+        return postChat(mintRes ? mintRes.token : null);
       })
       .then(function (res) {
         if (res.status === 401 || res.status === 403) {
@@ -1114,9 +1136,14 @@
               var code = errBody && errBody.code ? String(errBody.code) : '';
               if (code === 'UNAUTHORIZED_OWNERSHIP') {
                 rotateConversationId();
+              } else {
+                state.visitorToken = null;
               }
-              return ensureVisitorToken(true).then(function (freshToken) {
-                return postChat(freshToken);
+              return ensureVisitorToken(true).then(function (freshRes) {
+                if (freshRes && freshRes.fatalError) {
+                  throw new Error(freshRes.fatalError);
+                }
+                return postChat(freshRes ? freshRes.token : null);
               });
             });
         }

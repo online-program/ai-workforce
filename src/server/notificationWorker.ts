@@ -25,43 +25,33 @@ export async function runNotificationWorker(): Promise<{ processed: number; succ
   try {
     const db = getAdminDb();
     const nowIso = new Date().toISOString();
-    const usersSnap = await db.collection('users').get();
 
-    for (const userDoc of usersSnap.docs) {
-      const tenantId = userDoc.id;
+    const outboxSnap = await db
+      .collectionGroup('notification_outbox')
+      .where('status', 'in', ['queued', 'failed'])
+      .limit(50)
+      .get();
 
-      const [queuedSnap, retrySnap] = await Promise.all([
-        db
-          .collection('users')
-          .doc(tenantId)
-          .collection('notification_outbox')
-          .where('status', '==', 'queued')
-          .limit(10)
-          .get(),
-        db
-          .collection('users')
-          .doc(tenantId)
-          .collection('notification_outbox')
-          .where('status', '==', 'failed')
-          .limit(10)
-          .get(),
-      ]);
-
-      const docsToProcess = [...queuedSnap.docs];
-      for (const d of retrySnap.docs) {
-        const data = d.data();
-        if (!data.next_retry_at || data.next_retry_at <= nowIso) {
-          docsToProcess.push(d);
-        }
+    for (const notifDoc of outboxSnap.docs) {
+      const data = notifDoc.data() || {};
+      if (data.status === 'failed' && data.next_retry_at && data.next_retry_at > nowIso) {
+        continue;
       }
 
-      for (const notifDoc of docsToProcess) {
-        const res = await processOutboxNotification(tenantId, notifDoc.id);
-        if (!res.skipped) {
-          processed += 1;
-          if (res.success) succeeded += 1;
-          else failed += 1;
-        }
+      const tenantId =
+        (typeof data.tenant_id === 'string' && data.tenant_id.trim()) ||
+        (notifDoc.ref as any)?.parent?.parent?.id ||
+        '';
+
+      if (!tenantId) {
+        continue;
+      }
+
+      const res = await processOutboxNotification(tenantId, notifDoc.id);
+      if (!res.skipped) {
+        processed += 1;
+        if (res.success) succeeded += 1;
+        else failed += 1;
       }
     }
   } catch (err: any) {
@@ -70,6 +60,10 @@ export async function runNotificationWorker(): Promise<{ processed: number; succ
         console.warn('[NotificationWorker] Missing Firestore permissions; background polling paused.');
         hasNotifiedMissingCreds = true;
       }
+      return { processed, succeeded, failed };
+    }
+    if (err?.code === 9 || err?.message?.includes('FAILED_PRECONDITION')) {
+      console.warn('[NotificationWorker] Collection group query index required for notification_outbox:', err?.message || err);
       return { processed, succeeded, failed };
     }
     console.error('[NotificationWorker] Error processing notifications:', err);

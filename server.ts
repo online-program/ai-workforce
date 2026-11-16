@@ -44,7 +44,13 @@ import { getProviderCapabilities, getModelTelemetry, DEFAULT_MODEL_ROUTES } from
 import { approveAndSendEnquiryReply } from './src/server/enquiryWorkflowService.ts';
 import { buildPublicSummary, isReservedOfficialWidgetId, stripPrivateFieldsFromWidget } from './src/server/platformConfig.ts';
 import crypto from 'crypto';
-import { issueVisitorSessionToken, verifyVisitorSessionToken, isVisitorSessionSecretConfigured } from './src/server/visitorSessionService.ts';
+import {
+  issueVisitorSessionToken,
+  verifyVisitorSessionToken,
+  isVisitorSessionSecretConfigured,
+  ensureClusterVisitorSessionSecret,
+  getVisitorSessionSecretStatus,
+} from './src/server/visitorSessionService.ts';
 import { acceptHumanHandoff, sendHumanHandoffReply, returnControlToAlpha } from './src/server/durableHandoffService.ts';
 import dotenv from 'dotenv';
 
@@ -61,15 +67,20 @@ async function startServer() {
   // Initialize Admin Role Store & Bootstrap accounts
   await initializeAdminStore().catch((err) => console.warn('Admin store initialization notice:', err));
 
+  // Hydrate shared cluster signing key from Admin Firestore if production env var wasn't injected
+  if (process.env.NODE_ENV === 'production' && !isVisitorSessionSecretConfigured() && hasAdminCredentials()) {
+    await ensureClusterVisitorSessionSecret(getAdminDb()).catch(() => false);
+  }
+
   // Start notification worker
   setInterval(async () => {
     const { runNotificationWorker } = await import('./src/server/notificationWorker.ts');
     await runNotificationWorker();
   }, 5 * 60 * 1000);
 
-  // Requirement 1: Startup check for production signing secret
+  // Startup check for production signing secret
   if (process.env.NODE_ENV === 'production' && !isVisitorSessionSecretConfigured()) {
-    console.error('[SECURITY CRITICAL] VISITOR_SESSION_SECRET (or SESSION_SECRET) is missing or < 32 chars in production. Readiness check will fail closed (503) and visitor sessions will fail until configured.');
+    console.error('[SECURITY CRITICAL] VISITOR_SESSION_SECRET (or SESSION_SECRET) is missing or < 32 chars in production and cluster Firestore secret is unavailable. Readiness check and widget session/chat endpoints will fail closed (503).');
   }
 
   // Security: Apply robust production HTTP security headers
@@ -242,23 +253,39 @@ async function startServer() {
   };
 
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', service: 'AI Workforce', time: new Date().toISOString(), uptime: process.uptime() });
+    const signingStatus = getVisitorSessionSecretStatus();
+    res.json({
+      status: 'ok',
+      service: 'AI Workforce',
+      node_env: process.env.NODE_ENV || 'development',
+      revision: process.env.K_REVISION || null,
+      session_signing: signingStatus.source,
+      session_key_fingerprint: signingStatus.fingerprintPrefix,
+      time: new Date().toISOString(),
+      uptime: process.uptime(),
+    });
   });
 
   app.get('/api/readiness', async (req, res) => {
     const time = new Date().toISOString();
+    const signingStatus = getVisitorSessionSecretStatus();
     if (process.env.NODE_ENV === 'production' && !isVisitorSessionSecretConfigured()) {
       return res.status(503).json({
         status: 'not_ready',
-        session_signing: 'misconfigured',
-        error: 'VISITOR_SESSION_SECRET (or SESSION_SECRET) must be set to at least 32 characters in production.',
+        node_env: process.env.NODE_ENV,
+        revision: process.env.K_REVISION || null,
+        session_signing: signingStatus.source,
+        error: 'VISITOR_SESSION_SECRET (or SESSION_SECRET) is missing in production and shared Firestore signing key could not be hydrated.',
         time,
       });
     }
     if (!hasAdminCredentials()) {
       return res.status(503).json({
         status: 'not_ready',
+        node_env: process.env.NODE_ENV || 'development',
         database: 'unavailable',
+        session_signing: signingStatus.source,
+        session_key_fingerprint: signingStatus.fingerprintPrefix,
         error: 'Firebase Admin credentials are not configured.',
         time,
       });
@@ -267,7 +294,10 @@ async function startServer() {
     if (!probe.ok) {
       return res.status(503).json({
         status: 'not_ready',
+        node_env: process.env.NODE_ENV || 'development',
         database: 'disconnected',
+        session_signing: signingStatus.source,
+        session_key_fingerprint: signingStatus.fingerprintPrefix,
         latencyMs: probe.latencyMs,
         error: probe.error || 'Firestore readiness probe failed.',
         time,
@@ -275,8 +305,11 @@ async function startServer() {
     }
     return res.json({
       status: 'ready',
+      node_env: process.env.NODE_ENV || 'development',
+      revision: process.env.K_REVISION || null,
       database: 'connected',
-      session_signing: isVisitorSessionSecretConfigured() ? 'configured' : 'dev_ephemeral',
+      session_signing: signingStatus.source,
+      session_key_fingerprint: signingStatus.fingerprintPrefix,
       latencyMs: probe.latencyMs,
       time,
     });
@@ -457,6 +490,14 @@ async function startServer() {
         }
       }
 
+      if (process.env.NODE_ENV === 'production' && !isVisitorSessionSecretConfigured()) {
+        return res.status(503).json({
+          success: false,
+          error: 'Visitor session signing is not configured on this server.',
+          code: 'SESSION_SIGNING_UNCONFIGURED',
+        });
+      }
+
       const token = issueVisitorSessionToken({
         tenant_id: tenantId,
         widget_id: widgetConfig.widget_id,
@@ -467,7 +508,11 @@ async function startServer() {
       return res.json({ success: true, token, visitor_session_token: token });
     } catch (err: any) {
       console.error('Error in POST /api/widget/session:', err);
-      return res.status(503).json({ success: false, error: 'Failed to validate conversation or issue visitor session' });
+      return res.status(503).json({
+        success: false,
+        error: 'Failed to validate conversation or issue visitor session',
+        code: 'SESSION_SIGNING_UNCONFIGURED',
+      });
     }
   });
 
@@ -1403,8 +1448,16 @@ async function startServer() {
         }
       }
 
-      // Enforce visitor_session_token verification for existing conversations or when a visitor token is presented
+      // Enforce visitor_session_token signing availability & verification consistently across Turn 1..N (no Turn-1 bypass)
       if (!wantsSimulation && widgetConfig) {
+        if (process.env.NODE_ENV === 'production' && !isVisitorSessionSecretConfigured()) {
+          return res.status(503).json({
+            success: false,
+            error: 'Visitor session signing is not configured on this server.',
+            code: 'SESSION_SIGNING_UNCONFIGURED',
+          });
+        }
+
         const effectiveTenantId = widgetConfig.user_id || widgetConfig.widget_id;
         const authHeader = (req.headers.authorization as string) || '';
         const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
@@ -1434,6 +1487,14 @@ async function startServer() {
               }
             } catch {}
           }
+        }
+
+        if (existingVisitorOwner && visitor_id && existingVisitorOwner !== String(visitor_id)) {
+          return res.status(403).json({
+            success: false,
+            error: 'Forbidden: Conversation belongs to another visitor.',
+            code: 'UNAUTHORIZED_OWNERSHIP',
+          });
         }
 
         if (providedVisitorToken || conversationExists) {

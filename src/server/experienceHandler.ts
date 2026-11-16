@@ -2,6 +2,7 @@ import express from 'express';
 import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
+import { getAdminDb, hasAdminCredentials } from './firebaseAdmin.ts';
 
 dotenv.config();
 
@@ -48,8 +49,12 @@ export interface GuestSessionRecord {
 const MAX_GUEST_SESSIONS = 1000;
 const MAX_IP_RATE_BUCKETS = 5000;
 
-// Server-only isolated in-memory store (never exposed to Firestore public rules)
+// Bounded process cache backed by server-only Firestore collection `guest_sessions`
 const guestSessions = new Map<string, GuestSessionRecord>();
+
+export function clearExperienceSessionCacheForTesting(): void {
+  guestSessions.clear();
+}
 
 // IP Rate Limiters
 const ipSessionCreations = new Map<string, number[]>();
@@ -93,6 +98,47 @@ function setBoundedGuestSession(sessionId: string, session: GuestSessionRecord) 
     }
   }
   guestSessions.set(sessionId, session);
+}
+
+async function persistGuestSession(session: GuestSessionRecord): Promise<void> {
+  setBoundedGuestSession(session.sessionId, session);
+  if (!hasAdminCredentials()) return;
+  try {
+    await getAdminDb().collection('guest_sessions').doc(session.sessionId).set(session);
+  } catch (err: any) {
+    const msg = String(err?.message || err);
+    if (err?.code !== 7 && !msg.includes('PERMISSION_DENIED')) {
+      console.warn('[ExperienceMode] Firestore persistence notice:', msg);
+    }
+  }
+}
+
+async function deleteGuestSession(sessionId: string): Promise<void> {
+  guestSessions.delete(sessionId);
+  if (!hasAdminCredentials()) return;
+  try {
+    await getAdminDb().collection('guest_sessions').doc(sessionId).delete();
+  } catch {}
+}
+
+async function loadGuestSession(sessionId: string): Promise<GuestSessionRecord | null> {
+  const cached = guestSessions.get(sessionId);
+  if (cached) return cached;
+  if (!hasAdminCredentials()) return null;
+  try {
+    const snap = await getAdminDb().collection('guest_sessions').doc(sessionId).get();
+    if (!snap.exists) return null;
+    const data = snap.data() as GuestSessionRecord | undefined;
+    if (!data || !data.sessionId) return null;
+    setBoundedGuestSession(sessionId, data);
+    return data;
+  } catch (err: any) {
+    const msg = String(err?.message || err);
+    if (err?.code !== 7 && !msg.includes('PERMISSION_DENIED')) {
+      console.warn('[ExperienceMode] Firestore hydration notice:', msg);
+    }
+    return null;
+  }
 }
 
 // Periodic cleanup of expired or ended sessions
@@ -139,24 +185,24 @@ function verifyCapability(token: string, expectedHash: string): boolean {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
-function authorizeSession(
+async function authorizeSession(
   req: express.Request,
   res: express.Response,
   sessionId: string
-): GuestSessionRecord | null {
+): Promise<GuestSessionRecord | null> {
   if (!sessionId || typeof sessionId !== 'string') {
     res.status(400).json({ success: false, error: 'Invalid session identifier.' });
     return null;
   }
 
-  const session = guestSessions.get(sessionId);
+  const session = await loadGuestSession(sessionId);
   if (!session) {
     res.status(404).json({ success: false, error: 'Session not found or expired.' });
     return null;
   }
 
   if (Date.now() > session.expiresAt) {
-    guestSessions.delete(sessionId);
+    await deleteGuestSession(sessionId);
     res.status(401).json({ success: false, error: 'Session has expired. Please start a new demo.' });
     return null;
   }
@@ -190,7 +236,7 @@ router.use((req, res, next) => {
 // ============================================================================
 // 1. CREATE GUEST SESSION
 // ============================================================================
-router.post('/session', (req, res) => {
+router.post('/session', async (req, res) => {
   const ip = getClientIp(req);
   if (!checkIpRateLimit(ipSessionCreations, ip, MAX_SESSIONS_PER_IP_15M, 15 * 60 * 1000)) {
     return res.status(429).json({
@@ -226,7 +272,7 @@ router.post('/session', (req, res) => {
     chatTurns: 0,
   };
 
-  setBoundedGuestSession(sessionId, session);
+  await persistGuestSession(session);
 
   return res.status(201).json({
     success: true,
@@ -241,8 +287,8 @@ router.post('/session', (req, res) => {
 // ============================================================================
 // 2. GET GUEST SESSION (FOR REFRESH / RESTORATION)
 // ============================================================================
-router.get('/session/:sessionId', (req, res) => {
-  const session = authorizeSession(req, res, req.params.sessionId);
+router.get('/session/:sessionId', async (req, res) => {
+  const session = await authorizeSession(req, res, req.params.sessionId);
   if (!session) return;
 
   return res.json({
@@ -262,7 +308,7 @@ router.get('/session/:sessionId', (req, res) => {
 router.post('/onboard', async (req, res) => {
   try {
     const { sessionId, message } = req.body || {};
-    const session = authorizeSession(req, res, sessionId);
+    const session = await authorizeSession(req, res, sessionId);
     if (!session) return;
 
     if (session.stage !== 'created' && session.stage !== 'onboarding' && session.stage !== 'review') {
@@ -279,6 +325,7 @@ router.post('/onboard', async (req, res) => {
 
     if (session.onboardingTurns >= MAX_ONBOARDING_TURNS) {
       session.stage = 'review';
+      await persistGuestSession(session);
       return res.json({
         success: true,
         reply: "We've covered a lot of ground! Let's review your Company Brain now before launching your live Alpha demo.",
@@ -397,6 +444,7 @@ ${message.trim()}
     );
     session.onboardingTurns += 1;
     session.stage = isComplete ? 'review' : 'onboarding';
+    await persistGuestSession(session);
 
     return res.json({
       success: true,
@@ -417,9 +465,9 @@ ${message.trim()}
 // ============================================================================
 // 4. UPDATE / CORRECT TEMPORARY COMPANY BRAIN
 // ============================================================================
-router.put('/brain', (req, res) => {
+router.put('/brain', async (req, res) => {
   const { sessionId, companyBrain, stage } = req.body || {};
-  const session = authorizeSession(req, res, sessionId);
+  const session = await authorizeSession(req, res, sessionId);
   if (!session) return;
 
   if (!companyBrain || typeof companyBrain !== 'object') {
@@ -447,6 +495,8 @@ router.put('/brain', (req, res) => {
     session.stage = stage;
   }
 
+  await persistGuestSession(session);
+
   return res.json({
     success: true,
     stage: session.stage,
@@ -457,9 +507,9 @@ router.put('/brain', (req, res) => {
 // ============================================================================
 // 5. START LIVE DEMO
 // ============================================================================
-router.post('/start-demo', (req, res) => {
+router.post('/start-demo', async (req, res) => {
   const { sessionId } = req.body || {};
-  const session = authorizeSession(req, res, sessionId);
+  const session = await authorizeSession(req, res, sessionId);
   if (!session) return;
 
   session.stage = 'live_demo';
@@ -473,6 +523,8 @@ router.post('/start-demo', (req, res) => {
       timestamp: new Date().toISOString(),
     });
   }
+
+  await persistGuestSession(session);
 
   return res.json({
     success: true,
@@ -489,7 +541,7 @@ router.post('/start-demo', (req, res) => {
 router.post('/chat', async (req, res) => {
   try {
     const { sessionId, message } = req.body || {};
-    const session = authorizeSession(req, res, sessionId);
+    const session = await authorizeSession(req, res, sessionId);
     if (!session) return;
 
     if (session.stage !== 'live_demo') {
@@ -571,6 +623,7 @@ STRICT GROUNDING & TRUTHFULNESS RULES:
       { sender: 'assistant', text: reply, timestamp: nowIso }
     );
     session.chatTurns += 1;
+    await persistGuestSession(session);
 
     return res.json({
       success: true,
@@ -588,13 +641,13 @@ STRICT GROUNDING & TRUTHFULNESS RULES:
 // ============================================================================
 // 7. END & DELETE GUEST SESSION
 // ============================================================================
-router.post('/end', (req, res) => {
+router.post('/end', async (req, res) => {
   const { sessionId } = req.body || {};
-  const session = authorizeSession(req, res, sessionId);
+  const session = await authorizeSession(req, res, sessionId);
   if (!session) return;
 
   session.stage = 'ended';
-  guestSessions.delete(sessionId);
+  await deleteGuestSession(sessionId);
 
   return res.json({
     success: true,

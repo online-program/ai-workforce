@@ -54,7 +54,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Server-only internal collections
+    // Server-only signing secrets & internal lookup collections
+    match /system_secrets/{secretId} {
+      allow read, write: if false;
+    }
+
     match /widget_lookup/{widgetId} {
       allow read, write: if false;
     }
@@ -178,10 +182,20 @@ service cloud.firestore {
       // Website chat conversations per user
       match /conversations/{conversationId} {
         allow read, write: if isOwner(userId) || isSystemAdmin();
+
+        // Distributed turn idempotency locks (Admin SDK only)
+        match /turns/{turnId} {
+          allow read, write: if false;
+        }
       }
 
       // Tenant analytics / handoffs / outbox subcollections
       match /handoffs/{handoffId} {
+        allow read: if isOwner(userId) || isSystemAdmin();
+        allow write: if false;
+      }
+
+      match /notification_outbox/{outboxId} {
         allow read: if isOwner(userId) || isSystemAdmin();
         allow write: if false;
       }

@@ -24,18 +24,118 @@ export interface VisitorTokenVerificationResult {
 
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const DEV_EPHEMERAL_SECRET = crypto.randomBytes(32).toString('hex');
+let runtimeClusterSecret: string | null = null;
+
+export function setRuntimeClusterSigningSecret(secret: string | null): void {
+  if (secret === null) {
+    runtimeClusterSecret = null;
+    return;
+  }
+  const clean = String(secret).trim();
+  if (clean.length < 32) {
+    throw new Error('[SECURITY] Cluster signing secret must be at least 32 characters.');
+  }
+  runtimeClusterSecret = clean;
+}
 
 export function isVisitorSessionSecretConfigured(): boolean {
-  const configured = (process.env.VISITOR_SESSION_SECRET || process.env.SESSION_SECRET || '').trim();
-  return configured.length >= 32;
+  const envConfigured = (process.env.VISITOR_SESSION_SECRET || process.env.SESSION_SECRET || '').trim();
+  if (envConfigured.length >= 32) return true;
+  return Boolean(runtimeClusterSecret && runtimeClusterSecret.length >= 32);
+}
+
+export function getVisitorSessionSecretStatus(): {
+  configured: boolean;
+  source: 'env' | 'cluster_firestore' | 'dev_ephemeral' | 'unconfigured';
+  fingerprintPrefix: string | null;
+} {
+  const envConfigured = (process.env.VISITOR_SESSION_SECRET || process.env.SESSION_SECRET || '').trim();
+  if (envConfigured.length >= 32) {
+    return {
+      configured: true,
+      source: 'env',
+      fingerprintPrefix: crypto.createHash('sha256').update(envConfigured).digest('hex').slice(0, 8),
+    };
+  }
+  if (runtimeClusterSecret && runtimeClusterSecret.length >= 32) {
+    return {
+      configured: true,
+      source: 'cluster_firestore',
+      fingerprintPrefix: crypto.createHash('sha256').update(runtimeClusterSecret).digest('hex').slice(0, 8),
+    };
+  }
+  if (process.env.NODE_ENV !== 'production') {
+    const devSecret = process.env.FIREBASE_PRIVATE_KEY || DEV_EPHEMERAL_SECRET;
+    return {
+      configured: true,
+      source: 'dev_ephemeral',
+      fingerprintPrefix: crypto.createHash('sha256').update(devSecret).digest('hex').slice(0, 8),
+    };
+  }
+  return { configured: false, source: 'unconfigured', fingerprintPrefix: null };
+}
+
+/**
+ * Ensures multi-instance Cloud Run production containers share a single cryptographically random
+ * HMAC signing key even when VISITOR_SESSION_SECRET was not manually configured in environment vars.
+ * Never falls back to public client config; fails closed if Admin Firestore is unavailable.
+ */
+export async function ensureClusterVisitorSessionSecret(db: any): Promise<boolean> {
+  const envConfigured = (process.env.VISITOR_SESSION_SECRET || process.env.SESSION_SECRET || '').trim();
+  if (envConfigured.length >= 32) {
+    return true;
+  }
+  if (runtimeClusterSecret && runtimeClusterSecret.length >= 32) {
+    return true;
+  }
+  if (!db) return false;
+
+  try {
+    const secretRef = db.collection('system_secrets').doc('visitor_session');
+    const resolvedSecret = await db.runTransaction(async (tx: any) => {
+      const snap = await tx.get(secretRef);
+      if (snap.exists) {
+        const existing = String(snap.data()?.secret || '').trim();
+        if (existing.length >= 32) {
+          return existing;
+        }
+      }
+      const generated = crypto.randomBytes(32).toString('hex');
+      const payload = {
+        secret: generated,
+        purpose: 'visitor_session_hmac',
+        created_at: new Date().toISOString(),
+      };
+      if (typeof tx.create === 'function' && !snap.exists) {
+        tx.create(secretRef, payload);
+      } else {
+        tx.set(secretRef, payload, { merge: false });
+      }
+      return generated;
+    });
+
+    if (typeof resolvedSecret === 'string' && resolvedSecret.length >= 32) {
+      runtimeClusterSecret = resolvedSecret;
+      return true;
+    }
+    return false;
+  } catch (err: any) {
+    const msg = String(err?.message || err);
+    if (!msg.includes('PERMISSION_DENIED') && err?.code !== 7) {
+      console.warn('[SessionSigning] Could not hydrate cluster signing secret:', msg);
+    }
+    return false;
+  }
 }
 
 function getSigningSecret(secretOverride?: string): string {
-  const configured = (
-    secretOverride !== undefined
-      ? secretOverride
-      : process.env.VISITOR_SESSION_SECRET || process.env.SESSION_SECRET || ''
+  const envOrCluster = (
+    process.env.VISITOR_SESSION_SECRET ||
+    process.env.SESSION_SECRET ||
+    runtimeClusterSecret ||
+    ''
   ).trim();
+  const configured = (secretOverride !== undefined ? secretOverride : envOrCluster).trim();
 
   if (process.env.NODE_ENV === 'production') {
     if (!configured || configured.length < 32) {

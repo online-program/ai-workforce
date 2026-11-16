@@ -48,19 +48,19 @@ const INDUSTRIES: IndustryData[] = [
     solution:
       'Alpha discovers buyer tech stack, evaluates seat count, and answers technical integration questions instantly—scoring readiness into HOT, WARM, or COLD.',
     sampleDialog: {
-      visitor: 'Do you offer SOC 2 Type II compliance and SSO for 250 enterprise seats?',
+      visitor: 'Do you support custom enterprise onboarding and security documentation requests?',
       alpha:
-        'Yes. AI Workforce maintains SOC 2 Type II compliance and SAML 2.0 / Okta SSO across enterprise workspaces. For 250 seats, our annual contract includes a dedicated customer engineer. Would you like our enterprise security brief?',
+        'Alpha answers deployment and workspace questions directly from our Company Brain. I can also collect your organization details and escalate technical security or enterprise deployment requests to our team.',
     },
     metrics: [
-      { label: 'Demo Booking Velocity', value: '+42%' },
-      { label: 'Off-Hours Lead Capture', value: '68%' },
-      { label: 'Qualification Accuracy', value: '99.4%' },
+      { label: 'Availability', value: '24/7' },
+      { label: 'Lead Qualification', value: 'Structured' },
+      { label: 'Brain Grounding', value: 'Verified' },
     ],
     groundingSignals: [
-      'Verified SOC 2 & SLA Policies',
-      'Seat-Tiered Pricing Rules',
-      'Executive Calendar Routing',
+      'Configured Security & SLA Docs',
+      'Seat & Scope Qualification',
+      'Human Approval Escalation',
     ],
   },
   {
@@ -81,14 +81,14 @@ const INDUSTRIES: IndustryData[] = [
         'The Arctic Horizon boots are rated down to -25°C with 400g Thinsulate insulation and Vibram Arctic Grip soles. If the size doesn’t fit perfectly, we offer free 30-day exchanges in original condition.',
     },
     metrics: [
-      { label: 'Abandoned Cart Recovery', value: '+28%' },
-      { label: 'Instant Query Resolution', value: '<1.2s' },
-      { label: 'Zero Hallucinated Discounts', value: '100%' },
+      { label: 'Storefront Coverage', value: '24/7' },
+      { label: 'Policy Grounding', value: 'Strict' },
+      { label: 'Discounts', value: 'Rule-Gated' },
     ],
     groundingSignals: [
       'Catalog Specification Rules',
       'Return & Exchange Policies',
-      'Deterministic Shipping Rates',
+      'Configured Shipping Rules',
     ],
   },
   {
@@ -98,20 +98,20 @@ const INDUSTRIES: IndustryData[] = [
     icon: Briefcase,
     headline: 'Client Scoping & Structured Proposal Staging',
     description:
-      'Filter out tire-kickers and extract project deliverables, budget parameters, and launch horizons before any partner time is committed to free consultations.',
+      'Collect project deliverables, budget parameters, and launch horizons before partner time is committed to discovery consultations.',
     painPoint:
-      'Founders and senior partners spend 15+ hours weekly in discovery meetings with prospects who lack the required budget or timeline.',
+      'Founders and senior partners lose hours weekly in discovery meetings with prospects whose scope or budget is unclear.',
     solution:
-      'Alpha conducts consultative scoping, ensures inquiries satisfy your minimum engagement thresholds, and compiles executive briefs for 1-click partner review.',
+      'Alpha conducts consultative scoping, checks minimum engagement rules in your Company Brain, and stages structured briefs for human review.',
     sampleDialog: {
       visitor: 'We need a full rebrand and custom web app built over the next 3 months. Can we get an estimate?',
       alpha:
-        'Our custom branding and web application sprints start at $18,000 for a 10-week cycle. To ensure we have bandwidth for your launch, what is your expected go-live date and target market?',
+        'Illustrative example: Based on our configured scope rules, custom branding and web builds depend on deliverable count. Could you share your target launch date and core goals so our partners can review?',
     },
     metrics: [
-      { label: 'Partner Time Saved', value: '15 hrs/wk' },
-      { label: 'Proposal Staging Speed', value: 'Instant' },
-      { label: 'Low-Fit Inquiries Filtered', value: '84%' },
+      { label: 'Inquiry Triage', value: 'Structured' },
+      { label: 'Brief Staging', value: 'Instant' },
+      { label: 'Approval Workflow', value: 'Human-Led' },
     ],
     groundingSignals: [
       'Minimum Engagement Thresholds',
@@ -126,20 +126,20 @@ const INDUSTRIES: IndustryData[] = [
     icon: GraduationCap,
     headline: 'Prospective Student Guidance & Admissions Qualification',
     description:
-      'Guide applicants and parents through accreditation, tuition schedules, financial assistance, and prerequisite requirements with warm, reassuring, and 100% verified clarity.',
+      'Guide applicants and parents through curriculum details, tuition schedules, and prerequisite requirements with clear, Company Brain-grounded answers.',
     painPoint:
-      'Admissions teams are overwhelmed by repetitive enrollment inquiries during application deadlines, causing prospective students to look elsewhere.',
+      'Admissions teams are overloaded by repetitive enrollment inquiries during application deadlines, causing prospective students to wait.',
     solution:
-      'Alpha answers curriculum prerequisites, clarifies tuition payments, and pre-qualifies applicant readiness while escalating complex cases to counselors.',
+      'Alpha answers curriculum prerequisites, clarifies documented tuition terms, and escalates nuanced cases to admissions counselors.',
     sampleDialog: {
       visitor: 'Does the Data Engineering Fellowship require prior Python experience, and are monthly payment plans available?',
       alpha:
-        'The fellowship requires basic fluency in Python (functions and loops). We offer an interest-free 4-month installment plan of $1,250/month with zero upfront finance fees.',
+        'Illustrative example: Yes, our curriculum documentation lists basic Python fluency as a prerequisite, with installment terms detailed on your program guide. Would you like an advisor to follow up?',
     },
     metrics: [
-      { label: 'Inquiry Response Rate', value: '100%' },
-      { label: 'Application Starts', value: '+34%' },
-      { label: 'Admissions Desk Relief', value: '72%' },
+      { label: 'Admissions Availability', value: '24/7' },
+      { label: 'Response Speed', value: 'Real-Time' },
+      { label: 'Advisor Handoff', value: 'Durable' },
     ],
     groundingSignals: [
       'Curriculum Prerequisites',
@@ -154,20 +154,20 @@ const INDUSTRIES: IndustryData[] = [
     icon: Palette,
     headline: 'Screen Inbound Sponsorships, Licensing & Collaborations',
     description:
-      'Never let high-budget commercial sponsorships or brand deals get lost in a crowded inbox, while politely filtering unpaid requests and generic solicitations.',
+      'Keep high-budget commercial sponsorships and licensing inquiries organized while politely collecting project briefs and budgets.',
     painPoint:
-      'Creators and boutique studios miss lucrative commercial deals in flooded DMs and inquiry forms while wasting hours screening low-intent messages.',
+      'Creators and boutique studios miss serious commercial inquiries in flooded inbox threads while manually sorting unclear requests.',
     solution:
-      'Alpha screens brand briefs, verifies advertising budget tiers, collects campaign deliverables, and alerts you only when commercial terms match your criteria.',
+      'Alpha screens brand briefs against your rate guidance, collects campaign deliverables, and alerts your team when qualified commercial terms match.',
     sampleDialog: {
-      visitor: 'We want to sponsor a YouTube video integration for our fintech launch next month. What are your sponsorship rates?',
+      visitor: 'We want to sponsor a YouTube video integration for our launch next month. How does pricing work?',
       alpha:
-        'For 60-second dedicated YouTube integrations, rates start at $4,500 including usage rights across clips. To review your brand alignment, could you share your target campaign date and product brief?',
+        'Illustrative example: Sponsorship options depend on integration format and usage rights in your studio brief. Could you share your target launch window and campaign deliverables?',
     },
     metrics: [
-      { label: 'Commercial Deal Capture', value: '+55%' },
-      { label: 'Spam & Scraping Blocked', value: '98%' },
-      { label: 'Direct Creator Alert', value: '<30s' },
+      { label: 'Brief Capture', value: 'Structured' },
+      { label: 'Tenant Isolation', value: 'Per-Studio' },
+      { label: 'Escalation Mode', value: 'Durable' },
     ],
     groundingSignals: [
       'Sponsorship Rate Cards',

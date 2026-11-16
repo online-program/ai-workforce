@@ -1758,38 +1758,49 @@ export const AdminMarketingTab: React.FC<AdminMarketingTabProps> = ({
           </div>
 
           {/* Learnings Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {(analytics?.insights || []).map((ins: MarketingLearningInsight) => (
-              <div
-                key={ins.id}
-                className="p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 space-y-3 flex flex-col justify-between"
-              >
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="p-1.5 rounded-lg bg-purple-50 dark:bg-purple-950/60 text-purple-600">
-                      <Lightbulb className="w-4 h-4" />
-                    </span>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 dark:bg-neutral-800 text-slate-700 dark:text-neutral-300 font-mono">
-                      Confidence: {ins.confidence}
-                    </span>
-                  </div>
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-white leading-snug">
-                    {ins.title}
-                  </h4>
-                  <p className="text-xs text-slate-600 dark:text-neutral-400 leading-relaxed">
-                    {ins.observation}
-                  </p>
-                </div>
-
-                <div className="pt-3 border-t border-slate-100 dark:border-neutral-800">
-                  <div className="text-[10px] uppercase font-bold text-slate-400">Actionable Rule</div>
-                  <div className="text-xs font-semibold text-purple-700 dark:text-purple-300 mt-0.5">
-                    {ins.suggestedAction}
-                  </div>
-                </div>
+          {(analytics?.insights || []).length === 0 ? (
+            <div className="p-8 rounded-2xl bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 text-center space-y-2">
+              <div className="text-sm font-semibold text-slate-900 dark:text-white">
+                No Verified Campaign Learnings Yet
               </div>
-            ))}
-          </div>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                Publish approved content through a connected channel to collect real audience engagement metrics before generating optimization rules.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              {(analytics?.insights || []).map((ins: MarketingLearningInsight) => (
+                <div
+                  key={ins.id}
+                  className="p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 space-y-3 flex flex-col justify-between"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="p-1.5 rounded-lg bg-purple-50 dark:bg-purple-950/60 text-purple-600">
+                        <Lightbulb className="w-4 h-4" />
+                      </span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 dark:bg-neutral-800 text-slate-700 dark:text-neutral-300 font-mono">
+                        Confidence: {ins.confidence}
+                      </span>
+                    </div>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white leading-snug">
+                      {ins.title}
+                    </h4>
+                    <p className="text-xs text-slate-600 dark:text-neutral-400 leading-relaxed">
+                      {ins.observation}
+                    </p>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-100 dark:border-neutral-800">
+                    <div className="text-[10px] uppercase font-bold text-slate-400">Actionable Rule</div>
+                    <div className="text-xs font-semibold text-purple-700 dark:text-purple-300 mt-0.5">
+                      {ins.suggestedAction}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

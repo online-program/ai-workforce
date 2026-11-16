@@ -590,16 +590,6 @@ export async function savePublicWidgetConfig(
     studioConfig: studio,
   };
 
-  if (widgetConfigCache.size >= MAX_WIDGET_CACHE_ENTRIES) {
-    const oldestKey = widgetConfigCache.keys().next().value;
-    if (oldestKey) widgetConfigCache.delete(oldestKey);
-  }
-  widgetConfigCache.set(cleanWidgetId, {
-    config: updatedConfig,
-    expiry: Date.now() + WIDGET_CACHE_TTL_MS,
-  });
-  invalidateBrainCache(resolvedOwnerId || cleanWidgetId);
-
   if (hasAdminCredentials()) {
     const db = getAdminDb();
     const publicSafeDoc = stripPrivateFieldsFromWidget(
@@ -612,7 +602,7 @@ export async function savePublicWidgetConfig(
       { includeUserId: true }
     );
 
-    // Overwrite public_widgets doc without private company_profile fields
+    // Persist to authoritative storage BEFORE updating process-local caches (fail closed on write error)
     await db.collection('public_widgets').doc(cleanWidgetId).set(publicSafeDoc);
 
     await db.collection('widget_lookup').doc(cleanWidgetId).set(
@@ -639,6 +629,16 @@ export async function savePublicWidgetConfig(
         );
     }
   }
+
+  if (widgetConfigCache.size >= MAX_WIDGET_CACHE_ENTRIES) {
+    const oldestKey = widgetConfigCache.keys().next().value;
+    if (oldestKey) widgetConfigCache.delete(oldestKey);
+  }
+  widgetConfigCache.set(cleanWidgetId, {
+    config: updatedConfig,
+    expiry: Date.now() + WIDGET_CACHE_TTL_MS,
+  });
+  invalidateBrainCache(resolvedOwnerId || cleanWidgetId);
 
   return updatedConfig;
 }
@@ -1553,7 +1553,7 @@ async function finalizeAndPersistWidgetTurn(ctx: PreparedWidgetChatContext, chat
     conversation_id: convId,
   });
 
-  return {
+  const finalResponse = {
     ...chatResult,
     conversation_id: convId,
     message_id: assistantMsg.message_id,
@@ -1568,6 +1568,171 @@ async function finalizeAndPersistWidgetTurn(ctx: PreparedWidgetChatContext, chat
     ...(handoffId ? { handoff_id: handoffId, handoff_persisted: handoffPersisted } : {}),
     visitor_session_token,
   };
+
+  if (!isSimulation && clientMessageId && effectiveUserId && convId) {
+    await finalizeDistributedTurnLock(
+      effectiveUserId,
+      convId,
+      String(clientMessageId),
+      'completed',
+      {
+        reply: chatResult.reply,
+        conversation_id: convId,
+        message_id: assistantMsg.message_id,
+        customer_message_id: customerMsg.message_id,
+        client_message_id: String(clientMessageId),
+        reply_to_client_message_id: String(clientMessageId),
+        options: chatResult.options || [],
+        sentiment: chatResult.sentiment,
+        detected_intent: chatResult.detected_intent,
+        escalated_to_care: chatResult.escalated_to_care,
+        inquiry_registered: Boolean(chatResult.inquiry_registered),
+        inquiry_id: chatResult.inquiry_id,
+        db_confirmed: finalDbConfirmed,
+      }
+    );
+  }
+
+  return finalResponse;
+}
+
+const TURN_LOCK_LEASE_MS = 45_000;
+
+async function acquireDistributedTurnLock(
+  ctx: PreparedWidgetChatContext
+): Promise<{ acquired: boolean; lockOwnerId?: string; completedResult?: any; conflict?: boolean }> {
+  if (ctx.isSimulation || !ctx.clientMessageId || !ctx.effectiveUserId || !ctx.conversationId) {
+    return { acquired: true };
+  }
+  if (!hasAdminCredentials()) {
+    return { acquired: true };
+  }
+
+  const tenantId = ctx.effectiveUserId;
+  const convId = ctx.conversationId;
+  const cleanClientMsgId = String(ctx.clientMessageId).replace(/[/\\]/g, '_');
+  const lockOwnerId = `lock_${crypto.randomUUID()}`;
+
+  try {
+    const db = getAdminDb();
+    const lockRef = db
+      .collection('users')
+      .doc(tenantId)
+      .collection('conversations')
+      .doc(convId)
+      .collection('turns')
+      .doc(cleanClientMsgId);
+
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const now = Date.now();
+      const txResult = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(lockRef);
+        if (snap.exists) {
+          const data = snap.data() || {};
+          if (data.status === 'completed' && data.result) {
+            return { state: 'completed' as const, result: data.result };
+          }
+          if (
+            data.status === 'processing' &&
+            typeof data.lease_expires_at === 'number' &&
+            data.lease_expires_at > now
+          ) {
+            return { state: 'processing' as const };
+          }
+        }
+
+        tx.set(lockRef, {
+          status: 'processing',
+          owner_id: lockOwnerId,
+          client_message_id: cleanClientMsgId,
+          visitor_id: ctx.effectiveVisitorId || null,
+          acquired_at: now,
+          lease_expires_at: now + TURN_LOCK_LEASE_MS,
+          updated_at: new Date(now).toISOString(),
+        });
+        return { state: 'acquired' as const };
+      });
+
+      if (txResult.state === 'acquired') {
+        return { acquired: true, lockOwnerId };
+      }
+
+      if (txResult.state === 'completed') {
+        const freshToken = safeIssueVisitorSessionToken({
+          tenant_id: tenantId,
+          widget_id: ctx.widgetConfig?.widget_id,
+          visitor_id: ctx.effectiveVisitorId || `vis_${crypto.randomUUID()}`,
+          conversation_id: convId,
+        });
+        return {
+          acquired: false,
+          completedResult: {
+            ...txResult.result,
+            visitor_session_token: freshToken,
+            is_idempotent_retry: true,
+            deduplicated: true,
+          },
+        };
+      }
+
+      // Another Cloud Run instance currently holds the lock — wait briefly to coalesce cleanly
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+
+    return { acquired: false, conflict: true };
+  } catch (err: any) {
+    const msg = String(err?.message || err);
+    if (!msg.includes('PERMISSION_DENIED') && err?.code !== 7) {
+      console.warn('[TurnLock] Distributed lock fallback:', msg);
+    }
+    return { acquired: true };
+  }
+}
+
+async function finalizeDistributedTurnLock(
+  tenantId: string,
+  convId: string,
+  clientMessageId: string,
+  status: 'completed' | 'failed',
+  payload: Record<string, any>
+): Promise<void> {
+  if (!hasAdminCredentials() || !tenantId || !convId || !clientMessageId) return;
+  const cleanClientMsgId = String(clientMessageId).replace(/[/\\]/g, '_');
+  try {
+    const lockRef = getAdminDb()
+      .collection('users')
+      .doc(tenantId)
+      .collection('conversations')
+      .doc(convId)
+      .collection('turns')
+      .doc(cleanClientMsgId);
+
+    if (status === 'completed') {
+      await lockRef.set(
+        {
+          status: 'completed',
+          result: payload,
+          updated_at: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    } else {
+      await lockRef.set(
+        {
+          status: 'failed',
+          error: payload.error || 'Turn failed',
+          lease_expires_at: 0,
+          updated_at: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    }
+  } catch (err: any) {
+    const msg = String(err?.message || err);
+    if (!msg.includes('PERMISSION_DENIED') && err?.code !== 7) {
+      console.warn('[TurnLock] Failed to update turn lock state:', msg);
+    }
+  }
 }
 
 export async function handleWidgetChat(body: any) {
@@ -1591,11 +1756,37 @@ export async function handleWidgetChat(body: any) {
   }
 
   const runTurn = async () => {
-    const chatResult = await processWebsiteChatMessage(ctx.chatRequest);
-    if (chatResult.timing_metrics && body && typeof body === 'object') {
-      body.timing_metrics = chatResult.timing_metrics;
+    const lockRes = await acquireDistributedTurnLock(ctx);
+    if (lockRes.completedResult) {
+      return lockRes.completedResult;
     }
-    return finalizeAndPersistWidgetTurn(ctx, chatResult);
+    if (lockRes.conflict) {
+      return {
+        reply: 'Your previous message is still being processed. Please wait a moment and try again.',
+        conversation_id: ctx.conversationId,
+        db_confirmed: false,
+        in_progress: true,
+      };
+    }
+
+    try {
+      const chatResult = await processWebsiteChatMessage(ctx.chatRequest);
+      if (chatResult.timing_metrics && body && typeof body === 'object') {
+        body.timing_metrics = chatResult.timing_metrics;
+      }
+      return await finalizeAndPersistWidgetTurn(ctx, chatResult);
+    } catch (turnErr: any) {
+      if (!ctx.isSimulation && ctx.effectiveUserId && ctx.conversationId && ctx.clientMessageId) {
+        await finalizeDistributedTurnLock(
+          ctx.effectiveUserId,
+          ctx.conversationId,
+          String(ctx.clientMessageId),
+          'failed',
+          { error: turnErr?.message || String(turnErr) }
+        );
+      }
+      throw turnErr;
+    }
   };
 
   if (!inFlightKey) {
@@ -1649,11 +1840,44 @@ export async function* handleWidgetChatStream(body: any, abortSignal?: AbortSign
       resolveTurn = res;
       rejectTurn = rej;
     });
+    sharedPromise.catch(() => {});
     inFlightWidgetTurns.set(inFlightKey, sharedPromise);
   }
 
   let settled = false;
+  let completedSuccessfully = false;
+  let lockAcquired = false;
   try {
+    const lockRes = await acquireDistributedTurnLock(ctx);
+    if (lockRes.completedResult) {
+      completedSuccessfully = true;
+      if (inFlightKey && !settled) {
+        settled = true;
+        resolveTurn(lockRes.completedResult);
+      }
+      if (lockRes.completedResult.reply) {
+        yield { type: 'chunk', text: lockRes.completedResult.reply };
+      }
+      yield { type: 'metadata', data: lockRes.completedResult };
+      return;
+    }
+    if (lockRes.conflict) {
+      const conflictResp = {
+        reply: 'Your previous message is still being processed. Please wait a moment and try again.',
+        conversation_id: ctx.conversationId,
+        db_confirmed: false,
+        in_progress: true,
+      };
+      completedSuccessfully = true;
+      if (inFlightKey && !settled) {
+        settled = true;
+        resolveTurn(conflictResp);
+      }
+      yield { type: 'metadata', data: conflictResp };
+      return;
+    }
+    lockAcquired = true;
+
     let finalMetadata: any = null;
     let streamedReply = '';
 
@@ -1685,16 +1909,24 @@ export async function* handleWidgetChatStream(body: any, abortSignal?: AbortSign
     }
 
     if (!finalMetadata) {
-      // Fallback if stream yielded no final metadata event
-      finalMetadata = {
-        reply: streamedReply,
-        conversation_id: ctx.conversationId,
-        is_sales_lead: false,
-        detected_intent: 'GENERAL_QUESTION',
-        inquiry_registered: false,
-        registration_attempted: false,
-        grounded_in_brain: false,
-      };
+      if (!streamedReply.trim()) {
+        const recovered = await processWebsiteChatMessage(ctx.chatRequest);
+        if (recovered?.reply) {
+          yield { type: 'chunk', text: recovered.reply };
+        }
+        finalMetadata = recovered;
+      } else {
+        // Fallback if stream yielded chunks without final metadata event
+        finalMetadata = {
+          reply: streamedReply,
+          conversation_id: ctx.conversationId,
+          is_sales_lead: false,
+          detected_intent: 'GENERAL_QUESTION',
+          inquiry_registered: false,
+          registration_attempted: false,
+          grounded_in_brain: false,
+        };
+      }
     }
 
     if (finalMetadata.timing_metrics && body && typeof body === 'object') {
@@ -1702,6 +1934,7 @@ export async function* handleWidgetChatStream(body: any, abortSignal?: AbortSign
     }
 
     const finalized = await finalizeAndPersistWidgetTurn(ctx, finalMetadata);
+    completedSuccessfully = true;
     if (inFlightKey && !settled) {
       settled = true;
       resolveTurn(finalized);
@@ -1714,6 +1947,19 @@ export async function* handleWidgetChatStream(body: any, abortSignal?: AbortSign
     }
     throw err;
   } finally {
+    if (inFlightKey && !settled) {
+      settled = true;
+      rejectTurn(new Error('Stream closed before completion'));
+    }
+    if (lockAcquired && !completedSuccessfully && !ctx.isSimulation && ctx.effectiveUserId && ctx.conversationId && ctx.clientMessageId) {
+      await finalizeDistributedTurnLock(
+        ctx.effectiveUserId,
+        ctx.conversationId,
+        String(ctx.clientMessageId),
+        'failed',
+        { error: abortSignal?.aborted ? 'Stream aborted' : 'Stream failed' }
+      );
+    }
     if (inFlightKey) {
       inFlightWidgetTurns.delete(inFlightKey);
     }

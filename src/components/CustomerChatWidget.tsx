@@ -699,6 +699,30 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
     return null;
   });
 
+  // Authoritative synchronous refs to avoid React state closure lag between sequential messages
+  const conversationIdRef = useRef<string>(conversationId);
+  const visitorTokenRef = useRef<string | null>(visitorToken);
+  const messagesRef = useRef<ChatMessage[]>(messages);
+  messagesRef.current = messages;
+
+  const updateConversationId = useCallback((nextConvId: string) => {
+    conversationIdRef.current = nextConvId;
+    setConversationId(nextConvId);
+  }, []);
+
+  const updateVisitorToken = useCallback((nextToken: string | null) => {
+    visitorTokenRef.current = nextToken;
+    setVisitorToken(nextToken);
+  }, []);
+
+  useEffect(() => {
+    conversationIdRef.current = conversationId;
+  }, [conversationId]);
+
+  useEffect(() => {
+    visitorTokenRef.current = visitorToken;
+  }, [visitorToken]);
+
   // Save to Persistent LocalStorage on any conversation update
   useEffect(() => {
     if (typeof window !== 'undefined' && messages.length > 0) {
@@ -723,21 +747,21 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
     let isMounted = true;
 
     const ensureVisitorToken = async (forceRefresh = false): Promise<string | null> => {
-      if (visitorToken && !forceRefresh) return visitorToken;
+      if (visitorTokenRef.current && !forceRefresh) return visitorTokenRef.current;
       try {
         const res = await fetch('/api/widget/session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             widget_id: widgetId,
-            conversation_id: conversationId,
+            conversation_id: conversationIdRef.current,
             visitor_id: visitorId,
           }),
         });
         if (!res.ok) return null;
         const data = await res.json();
         if (data?.success && data?.token && isMounted) {
-          setVisitorToken(data.token);
+          updateVisitorToken(data.token);
           return data.token;
         }
       } catch {}
@@ -755,7 +779,7 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
           },
           body: JSON.stringify({
             widget_id: widgetId,
-            conversation_id: conversationId,
+            conversation_id: conversationIdRef.current,
             visitor_id: visitorId,
             type,
             message_ids: messageIds,
@@ -770,25 +794,26 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
         let token = await ensureVisitorToken(false);
         if (!token) return;
 
+        const targetConvId = conversationIdRef.current;
         let res = await fetch(
-          `/api/widget/conversation?widget_id=${encodeURIComponent(widgetId)}&conversation_id=${encodeURIComponent(conversationId)}&visitor_id=${encodeURIComponent(visitorId)}`,
+          `/api/widget/conversation?widget_id=${encodeURIComponent(widgetId)}&conversation_id=${encodeURIComponent(targetConvId)}&visitor_id=${encodeURIComponent(visitorId)}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
 
         if (res.status === 401 || res.status === 403) {
           const errBody = await res.json().catch(() => ({} as any));
           if (errBody?.code === 'UNAUTHORIZED_OWNERSHIP') {
-            if (isMounted) {
+            if (isMounted && !isSendingRef.current) {
               const rotatedConvId = `conv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-              setConversationId(rotatedConvId);
-              setVisitorToken(null);
+              updateConversationId(rotatedConvId);
+              updateVisitorToken(null);
             }
             return;
           }
           token = await ensureVisitorToken(true);
           if (!token) return;
           res = await fetch(
-            `/api/widget/conversation?widget_id=${encodeURIComponent(widgetId)}&conversation_id=${encodeURIComponent(conversationId)}&visitor_id=${encodeURIComponent(visitorId)}`,
+            `/api/widget/conversation?widget_id=${encodeURIComponent(widgetId)}&conversation_id=${encodeURIComponent(conversationIdRef.current)}&visitor_id=${encodeURIComponent(visitorId)}`,
             { headers: { Authorization: `Bearer ${token}` } }
           );
         }
@@ -1014,15 +1039,16 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
     }
   };
 
-  // Reset / Start a pristine fresh conversation without prior context contamination
+  // Reset / Start a pristine fresh conversation without prior context or stale token contamination
   const handleStartNewChat = () => {
     if (activeAbortControllerRef.current) {
       activeAbortControllerRef.current.abort('Conversation reset');
     }
     isSendingRef.current = false;
     failedTurnRef.current = null;
-    const freshConvId = `conv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-    setConversationId(freshConvId);
+    const freshConvId = `conv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    updateConversationId(freshConvId);
+    updateVisitorToken(null);
     setCurrentLeadId(null);
     setLeadProfile(null);
     setHumanHandoffRequested(false);
@@ -1031,7 +1057,7 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
     setIsTyping(false);
     setStreamingMsgId(null);
     setDisplayedStreamingText('');
-    setMessages([
+    const resetMessages: ChatMessage[] = [
       {
         id: 'welcome-msg',
         sender: 'assistant',
@@ -1039,7 +1065,9 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
         timestamp: new Date().toISOString(),
         options: initialOptions,
       },
-    ]);
+    ];
+    messagesRef.current = resetMessages;
+    setMessages(resetMessages);
     if (typeof window !== 'undefined') {
       try {
         localStorage.removeItem(storagePersistenceKey);
@@ -1160,15 +1188,17 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
 
     const assistantMsgId = `amsg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
-    let historySnapshot: ChatMessage[] = [];
-    setMessages((prev) => {
-      const cleanedPrev = prev.filter((m) => m.id !== assistantMsgId && m.text.trim().length > 0);
-      const alreadyHasCustomerTurn = cleanedPrev.some(
-        (m) => m.id === clientMsgId || m.metadata?.client_message_id === clientMsgId
-      );
-      historySnapshot = alreadyHasCustomerTurn ? cleanedPrev : [...cleanedPrev, userMessageObj];
-      return historySnapshot;
-    });
+    const cleanedCurrent = messagesRef.current.filter(
+      (m) => m.id !== assistantMsgId && m.text.trim().length > 0
+    );
+    const alreadyHasCustomerTurn = cleanedCurrent.some(
+      (m) => m.id === clientMsgId || m.metadata?.client_message_id === clientMsgId
+    );
+    const historySnapshot: ChatMessage[] = alreadyHasCustomerTurn
+      ? cleanedCurrent
+      : [...cleanedCurrent, userMessageObj];
+    messagesRef.current = historySnapshot;
+    setMessages(historySnapshot);
 
     if (!retryClientMsgId) {
       playAudioChime('send');
@@ -1191,8 +1221,10 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
         } catch {}
       }
 
-      const mintSessionToken = async (targetConvId: string): Promise<string | null> => {
-        if (!effectiveWidgetIdForChat) return null;
+      const mintSessionToken = async (
+        targetConvId: string
+      ): Promise<{ token: string | null; fatalError?: string; ownershipConflict?: boolean }> => {
+        if (!effectiveWidgetIdForChat) return { token: null };
         try {
           const sRes = await fetch('/api/widget/session', {
             method: 'POST',
@@ -1204,20 +1236,41 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
             }),
             signal: controller.signal,
           });
-          if (!sRes.ok) return null;
           const sData = await sRes.json().catch(() => ({} as any));
+          if (!sRes.ok) {
+            if (sRes.status === 403 && sData?.code === 'UNAUTHORIZED_OWNERSHIP') {
+              return { token: null, ownershipConflict: true };
+            }
+            if (sRes.status === 503 || sData?.code === 'SESSION_SIGNING_UNCONFIGURED') {
+              return {
+                token: null,
+                fatalError: sData?.error || 'Visitor session service is temporarily unavailable.',
+              };
+            }
+            return { token: null };
+          }
           if (sData?.success && sData?.token) {
-            setVisitorToken(sData.token);
-            return sData.token;
+            updateVisitorToken(sData.token);
+            return { token: sData.token };
           }
         } catch {}
-        return null;
+        return { token: null };
       };
 
-      let activeVisitorToken = visitorToken;
-      let activeConvId = conversationId;
+      let activeConvId = conversationIdRef.current;
+      let activeVisitorToken = visitorTokenRef.current;
       if (!canUseSimulation && effectiveWidgetIdForChat && !activeVisitorToken) {
-        activeVisitorToken = await mintSessionToken(activeConvId);
+        let mintRes = await mintSessionToken(activeConvId);
+        if (mintRes.ownershipConflict) {
+          activeConvId = `conv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          updateConversationId(activeConvId);
+          updateVisitorToken(null);
+          mintRes = await mintSessionToken(activeConvId);
+        }
+        if (mintRes.fatalError) {
+          throw new Error(mintRes.fatalError);
+        }
+        activeVisitorToken = mintRes.token;
       }
 
       const sendChatRequest = async (
@@ -1273,14 +1326,23 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
           const errCode = typeof errBody?.code === 'string' ? errBody.code : '';
           if (errCode === 'UNAUTHORIZED_OWNERSHIP') {
             activeConvId = `conv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-            setConversationId(activeConvId);
-            setVisitorToken(null);
-            activeVisitorToken = await mintSessionToken(activeConvId);
+            updateConversationId(activeConvId);
+            updateVisitorToken(null);
+            const mintRes = await mintSessionToken(activeConvId);
+            if (mintRes.fatalError) {
+              throw new Error(mintRes.fatalError);
+            }
+            activeVisitorToken = mintRes.token;
             if (activeVisitorToken) {
               res = await sendChatRequest(activeVisitorToken, activeConvId, useStream);
             }
           } else if (res.status === 401 || errCode.startsWith('TOKEN_')) {
-            activeVisitorToken = await mintSessionToken(activeConvId);
+            updateVisitorToken(null);
+            const mintRes = await mintSessionToken(activeConvId);
+            if (mintRes.fatalError) {
+              throw new Error(mintRes.fatalError);
+            }
+            activeVisitorToken = mintRes.token;
             if (activeVisitorToken) {
               res = await sendChatRequest(activeVisitorToken, activeConvId, useStream);
             }
@@ -1355,6 +1417,9 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
                     setDisplayedStreamingText(accumulatedText);
                   } else if (eventData.type === 'metadata' && eventData.data) {
                     lastResult = eventData.data;
+                    if (eventData.data.visitor_session_token) {
+                      updateVisitorToken(eventData.data.visitor_session_token);
+                    }
                   } else if (eventData.type === 'error') {
                     streamFailedOrEmpty = true;
                   }
@@ -1367,6 +1432,10 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
         } catch (readErr) {
           console.warn('Stream read interrupted:', readErr);
           streamFailedOrEmpty = true;
+        } finally {
+          try {
+            reader.releaseLock();
+          } catch {}
         }
 
         if (activeRequestIdRef.current !== currentRequestId || controller.signal.aborted) {
@@ -1380,6 +1449,9 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
               accumulatedText += eventData.text;
             } else if (eventData.type === 'metadata' && eventData.data) {
               lastResult = eventData.data;
+              if (eventData.data.visitor_session_token) {
+                updateVisitorToken(eventData.data.visitor_session_token);
+              }
             }
           } catch {}
         }
@@ -1478,7 +1550,7 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
       });
       playAudioChime('receive');
       if (lastResult?.visitor_session_token) {
-        setVisitorToken(lastResult.visitor_session_token);
+        updateVisitorToken(lastResult.visitor_session_token);
       }
 
       // Lead & Work Queue Sync in Firestore (Non-blocking background sync, never for official landing widget)
@@ -1651,8 +1723,10 @@ export const CustomerChatWidget: React.FC<CustomerChatWidgetProps> = ({
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed?.messages) && parsed.messages.length > 0) {
+            messagesRef.current = parsed.messages;
             setMessages(parsed.messages);
-            if (parsed.conversationId) setConversationId(parsed.conversationId);
+            if (parsed.conversationId) updateConversationId(parsed.conversationId);
+            if (parsed.visitorToken) updateVisitorToken(parsed.visitorToken);
             if (parsed.leadProfile) setLeadProfile(parsed.leadProfile);
           }
         }

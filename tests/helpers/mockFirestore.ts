@@ -162,6 +162,64 @@ class MockCollectionRef extends MockQuery {
   doc(id: string): MockDocRef {
     return new MockDocRef(this.store, `${this.collectionPath}/${id}`, id);
   }
+
+  get parent(): MockDocRef | null {
+    const parts = this.collectionPath.split('/');
+    if (parts.length < 2) return null;
+    const parentDocPath = parts.slice(0, -1).join('/');
+    const parentId = parts[parts.length - 2]!;
+    return new MockDocRef(this.store, parentDocPath, parentId);
+  }
+}
+
+class MockCollectionGroupQuery {
+  constructor(
+    private readonly store: StoreMap,
+    private readonly collectionName: string,
+    private readonly filters: FilterClause[] = [],
+    private readonly limitCount?: number
+  ) {}
+
+  where(field: string, op: string, value: any): MockCollectionGroupQuery {
+    return new MockCollectionGroupQuery(this.store, this.collectionName, [...this.filters, { field, op, value }], this.limitCount);
+  }
+
+  limit(n: number): MockCollectionGroupQuery {
+    return new MockCollectionGroupQuery(this.store, this.collectionName, this.filters, n);
+  }
+
+  orderBy(): MockCollectionGroupQuery {
+    return this;
+  }
+
+  async get(): Promise<MockQuerySnapshot> {
+    const matched: Array<MockDocSnapshot & { ref: MockDocRef }> = [];
+    for (const [docPath, docData] of this.store.entries()) {
+      const segments = docPath.split('/');
+      if (segments.length < 2) continue;
+      if (segments[segments.length - 2] !== this.collectionName) continue;
+
+      let passes = true;
+      for (const f of this.filters) {
+        const val = docData[f.field];
+        if (f.op === '==' && val !== f.value) passes = false;
+        else if (f.op === '!=' && val === f.value) passes = false;
+        else if (f.op === 'in' && (!Array.isArray(f.value) || !f.value.includes(val))) passes = false;
+        if (!passes) break;
+      }
+
+      if (passes) {
+        const docId = segments[segments.length - 1]!;
+        const ref = new MockDocRef(this.store, docPath, docId) as MockDocRef & { parent?: MockCollectionRef };
+        (ref as any).parent = new MockCollectionRef(this.store, segments.slice(0, -1).join('/'));
+        const snap = new MockDocSnapshot(docId, docData) as MockDocSnapshot & { ref: MockDocRef };
+        snap.ref = ref;
+        matched.push(snap);
+        if (this.limitCount && matched.length >= this.limitCount) break;
+      }
+    }
+    return new MockQuerySnapshot(matched);
+  }
 }
 
 export class MockFirestore {
@@ -169,6 +227,10 @@ export class MockFirestore {
 
   collection(name: string): MockCollectionRef {
     return new MockCollectionRef(this.store, name);
+  }
+
+  collectionGroup(name: string): MockCollectionGroupQuery {
+    return new MockCollectionGroupQuery(this.store, name);
   }
 
   batch() {

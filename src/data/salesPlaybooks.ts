@@ -699,7 +699,7 @@ export const OFFICIAL_AI_WORKFORCE_PLAYBOOK: SalesPlaybook = {
     {
       id: 'founding_pricing',
       label: 'Pricing & Plans',
-      description: '$149/mo standard plan with zero setup fees',
+      description: 'Free during Alpha launch with zero setup fees',
       enabled: true,
     },
     {

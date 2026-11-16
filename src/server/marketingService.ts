@@ -305,17 +305,17 @@ Generate 3-4 structured research opportunities that our content team can turn di
     }
   }
 
-  // Deterministic fallback if API unavailable or throttled
+  // Deterministic fallback if API unavailable or throttled (marked explicitly as unverified draft prompt)
   const fallbackItem: MarketingResearchItem = {
     id: `res-${Date.now()}-fallback`,
-    topic: params.topic || 'Sub-Minute Inbound Lead Response in Enterprise SaaS',
-    whyItMatters: 'Lead qualification probability drops by 10x when response time exceeds 10 minutes according to industry benchmarks.',
+    topic: params.topic || 'Sub-Minute Inbound Lead Response in B2B Sales',
+    whyItMatters: 'Unverified editorial prompt (live research model offline): Faster, accurate inbound replies reduce prospect drop-off during off-hours evaluation.',
     targetAudience: 'B2B Sales Leaders and Revenue Operations',
-    contentOpportunity: 'Position Alpha as the 24/7 revenue frontline that guarantees zero lead decay.',
+    contentOpportunity: 'Position Alpha as a 24/7 Company Brain-grounded digital sales manager with human approval.',
     suggestedPlatform: 'linkedin',
     suggestedFormat: 'carousel',
-    source: 'Verified B2B Lead Conversion Benchmarks',
-    citations: ['InsideSales Response Speed Study', 'Harvard Business Review: Response Time Impact'],
+    source: 'Internal Fallback Draft (Requires primary verification before publishing)',
+    citations: [],
     status: 'NEW',
     createdAt: new Date().toISOString(),
     createdBy: 'AI Marketing Co-Founder',
@@ -429,7 +429,7 @@ ${researchContext}`;
     hook: 'If a high-intent enterprise prospect reaches out at 8 PM, who answers?',
     headline: 'Autonomous Inbound Qualification for Enterprise Revenue',
     bodyScript: `Every minute a qualified buyer waits for a reply reduces conversion odds.\n\nTraditional sales teams cannot maintain 24/7 sub-minute response times without massive overhead. Generic chatbots hallucinate and alienate buyers.\n\nAI Workforce deploys autonomous digital employees with deterministic guardrails—instantly qualifying inquiries, verifying requirements, and drafting exact replies for your team to approve.`,
-    cta: 'Explore how AI Workforce powers 24/7 revenue teams at aiworkforce.com',
+    cta: 'Explore how AI Workforce powers 24/7 revenue teams at aiworkforce.ai.studio',
     caption: 'Why 24/7 autonomous speed-to-lead is becoming the standard for modern commercial organizations.',
     hashtags: ['B2BSaaS', 'RevenueOps', 'AIWorkforce', 'EnterpriseAI'],
     visualDirection: 'Minimalist obsidian canvas with clean typography and mathematical data flow diagrams.',
@@ -1413,7 +1413,7 @@ export async function getMarketingAnalytics(): Promise<{
 
   return {
     metrics: [],
-    insights: defaultLearningInsights,
+    insights: [],
     summary: {
       totalPublished: published.length,
       scheduledCount: scheduled.length,
